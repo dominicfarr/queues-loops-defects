@@ -29,3 +29,7 @@ https://www.industriallogic.com/blog/faster-and-more-predictable/
 It popped up years later on linkedIn post https://www.linkedin.com/feed/update/urn:li:activity:7507747922164252672/
 
 I'm asking myself? Can this be actually modelled, calculate each ticket that goes through a pipe with the queues, loops, and defects this arcticle expresses costs in real terms? 
+
+## Where it went
+
+The model works, but most of its inputs are guesses, so the project is now heading for a playful game instead. The playable experiments are in [prototypes/](prototypes/), and the [project map](https://github.com/dominicfarr/queues-loops-defects/issues/1) tracks the decisions.
