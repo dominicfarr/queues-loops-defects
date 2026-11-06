@@ -14,6 +14,10 @@ _Avoid_: Game, session, round
 The team, demand and code a run starts with.
 _Avoid_: Mess, level, variant
 
+**Level**:
+A named bundle of scenarios and the moves that can be dealt in them.
+_Avoid_: Scenario, stage, world
+
 **Pace**:
 How moves arrive during a run, such as a new hand on a timer. Scores are only compared within one pace.
 _Avoid_: Mode, difficulty
@@ -37,6 +41,10 @@ _Avoid_: Upgrade, process
 **Score**:
 What actually reached users and worked. It is the only number a run is judged by.
 _Avoid_: Points, revenue
+
+**Impact**:
+What a ticket turns out to be worth when it reaches users. It can't be seen beforehand and falls the longer the ticket was in progress.
+_Avoid_: Value, business value
 
 **Dials**:
 The quick overall reading of queues, loops and defects. They don't count towards the score.
