@@ -19,3 +19,13 @@ pre-commit install --install-hooks
 This installs the hooks for both the `pre-commit` and `commit-msg` stages.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and the commit message format, and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the development practices.
+
+---
+## The idea was after reading these two years apart.
+
+Otter wrote this great article 
+https://www.industriallogic.com/blog/faster-and-more-predictable/
+
+It popped up years later on linkedIn post https://www.linkedin.com/feed/update/urn:li:activity:7507747922164252672/
+
+I'm asking myself? Can this be actually modelled, calculate each ticket that goes through a pipe with the queues, loops, and defects this arcticle expresses costs in real terms? 
