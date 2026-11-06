@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery Flow Prototype</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #ffffff; --ink: #1f2328; --muted: #5d6570; --line: #e2e0db;
+    --accent: #1f6f6b; --accent-ink: #ffffff; --accent-soft: #e3f1ef;
+    --warn-bg: #fdf1e3; --warn-ink: #7a4306;
+    --work: #1f6f6b; --policy: #d39a3c; --load: #b4553f; --triage: #7d6aa8; --interrupted: #8b929b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181b; --panel: #1d2125; --ink: #e8e9ea; --muted: #a0a7af; --line: #33383e;
+      --accent: #5cbdb6; --accent-ink: #0d1f1e; --accent-soft: #1f3534;
+      --warn-bg: #3a2a14; --warn-ink: #f2c98e;
+      --work: #5cbdb6; --policy: #dcae5c; --load: #d6796a; --triage: #a593cf; --interrupted: #99a0a8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .page { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  h3 { font-size: 14px; margin: 16px 0 6px; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .intro { max-width: 860px; margin-bottom: 20px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink); margin-bottom: 8px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .controls { grid-column: 1; grid-row: 1; display: grid; gap: 16px; min-width: 0; }
+  .state { grid-column: 2; grid-row: 1; display: grid; gap: 16px; min-width: 0; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .controls, .state { grid-column: 1; grid-row: auto; }
+  }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+  .scroll { overflow-x: auto; }
+  button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .group { margin-bottom: 10px; }
+  .group-label { font-size: 13px; color: var(--muted); margin-bottom: 3px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+  .step { display: block; width: 100%; text-align: left; margin-bottom: 4px; }
+  .step.next { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .step.done { color: var(--muted); }
+  .note { background: var(--accent-soft); border-radius: 6px; padding: 10px 12px; margin-top: 10px; font-size: 14px; }
+  .warning { background: var(--warn-bg); color: var(--warn-ink); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .tile .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .label { font-size: 12.5px; color: var(--muted); }
+  .changed { font-size: 14px; margin-bottom: 12px; }
+  .bar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; background: var(--line); }
+  .bar span { display: block; height: 100%; min-width: 1px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin-top: 6px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th { text-align: right; font-weight: 600; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  td.text, th.text { text-align: left; font-variant-numeric: normal; }
+  tr.current td { font-weight: 600; }
+  .journey { margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="intro">
+    <span class="tag">Throwaway prototype</span>
+    <h1>Delivery Flow Prototype</h1>
+    <p>Tickets move through the process in <a href="https://www.industriallogic.com/blog/faster-and-more-predictable/">Faster and More Predictable</a>. Press a button and the page simulates thousands of tickets again.</p>
+    <p><strong>The question:</strong> with loops off, can this reproduce the article's totals of 10, 17 and 25 days, and its check of 24 for a developer twice as fast and 27 for one twice as slow? With loops on, does a 2-day ticket plausibly take months, and under what conditions? Does this way of modelling behave sensibly enough to specify?</p>
+    <p class="muted small">"Months" here means more than 42 working days, which is two calendar months. Elapsed time only: labour cost and cost of delay are not modelled here.</p>
+  </header>
+  <div class="layout">
+    <div class="state" id="state"></div>
+    <div class="controls">
+      <section class="panel" id="walks"></section>
+      <section class="panel" id="free"></section>
+    </div>
+  </div>
+</div>
+<script id="model">
+// PROTOTYPE, throwaway. A pure model of tickets moving through a delivery process.
+// No DOM in here: the page calls in, nothing flows the other way.
+const Model = (() => {
+  const INF = Infinity;
+  const MONTHS_DAYS = 42; // "months" = more than two calendar months of working days
+
+  // The article's process. Waits and work are its figures; `articleWait` holds every
+  // wait as a policy wait, `teamWait` keeps only what is really policy and lets the
+  // rest emerge from people being busy. Security and performance keep 1.6 days of
+  // scheduling so the total lands on 25: that one figure is fitted, not sourced.
+  const STAGES = [
+    { id: 'dev',  name: 'Development',  articleWait: 5,   teamWait: 0,   work: 2,     teamPeople: 3,   cv: 0.75, detects: null,          detection: 0,    noDefect: 0 },
+    { id: 'rev',  name: 'Code review',  articleWait: 3,   teamWait: 3,   work: 0.125, teamPeople: 1,   cv: 0.5,  detects: 'functional',  detection: 0.30, noDefect: 0.15 },
+    { id: 'mrg',  name: 'Merge',        articleWait: 2,   teamWait: 2,   work: 0,     teamPeople: INF, cv: 0,    detects: null,          detection: 0,    noDefect: 0.15 },
+    { id: 'tst',  name: 'Testing',      articleWait: 2.5, teamWait: 0,   work: 2.5,   teamPeople: 4,   cv: 0.5,  detects: 'functional',  detection: 0.50, noDefect: 0.05 },
+    { id: 'sec',  name: 'Security testing',    articleWait: 2, teamWait: 1.6, work: 2, teamPeople: 4,  cv: 0.5,  detects: 'security',    detection: 0.52, noDefect: 0.05 },
+    { id: 'prf',  name: 'Performance testing', articleWait: 2, teamWait: 1.6, work: 2, teamPeople: 4,  cv: 0.5,  detects: 'performance', detection: 0.50, noDefect: 0.02 },
+  ];
+
+  const DEFAULTS = {
+    loops: false,
+    variability: false,
+    speed: 1,                 // developer speed: 2 = twice as fast
+    returnPolicy: 'back',     // fixNow | front | back | behind
+    competition: 'none',      // none | sprint | team
+    ticketsPerDay: 1.4,       // team mode
+    sprintDays: 10,
+    sprintFill: 1,            // share of developer capacity planned into a sprint
+    functionalDefects: 0.5,   // ASSUMPTION: no credible per-ticket figure exists
+    securityDefects: 0.05,    // ASSUMPTION
+    performanceDefects: 0.05, // ASSUMPTION
+    fixAddsDefect: 0.15,      // ASSUMPTION
+    fixWork: 0.25,            // article: "minutes to hours"
+    triageWait: 1,            // ASSUMPTION: article names this wait but gives no figure
+    detectionScale: 1,
+    noDefectScale: 1,
+    recheckShare: 1,          // ASSUMPTION: a repeat gate pass takes as long as the first
+    seed: 1,
+    warmup: 300, window: 2000, tail: 700,
+  };
+
+  function rngFrom(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function heap() {
+    const h = [];
+    const less = (a, b) => a.t < b.t || (a.t === b.t && a.seq < b.seq);
+    return {
+      push(e) {
+        h.push(e);
+        let i = h.length - 1;
+        while (i > 0) {
+          const p = (i - 1) >> 1;
+          if (!less(h[i], h[p])) break;
+          [h[i], h[p]] = [h[p], h[i]];
+          i = p;
+        }
+      },
+      pop() {
+        const top = h[0], last = h.pop();
+        if (h.length) {
+          h[0] = last;
+          let i = 0;
+          for (;;) {
+            const l = 2 * i + 1, r = l + 1;
+            let m = i;
+            if (l < h.length && less(h[l], h[m])) m = l;
+            if (r < h.length && less(h[r], h[m])) m = r;
+            if (m === i) break;
+            [h[i], h[m]] = [h[m], h[i]];
+            i = m;
+          }
+        }
+        return top;
+      },
+      get size() { return h.length; },
+    };
+  }
+
+  // The process a set of parameters describes: waits and people per stage.
+  function processFor(p) {
+    return STAGES.map(s => {
+      let wait, people;
+      if (p.competition === 'team') { wait = s.teamWait; people = s.teamPeople; }
+      else if (p.competition === 'sprint') {
+        wait = s.id === 'dev' ? 0 : s.articleWait;
+        people = s.id === 'dev' ? 3 : INF;
+      } else { wait = s.articleWait; people = INF; }
+      return {
+        ...s, wait, people,
+        work: s.id === 'dev' ? s.work / p.speed : s.work,
+        detection: Math.min(1, s.detection * p.detectionScale),
+        noDefect: Math.min(1, s.noDefect * p.noDefectScale),
+      };
+    });
+  }
+
+  function simulate(input) {
+    const p = { ...DEFAULTS, ...input };
+    const rand = rngFrom(p.seed * 2654435761);
+    const stages = processFor(p);
+    const horizon = p.warmup + p.window + p.tail;
+    const events = heap();
+    let seq = 0, now = 0, debt = 0;
+    const schedule = (t, type, ticket, stage) => events.push({ t, seq: seq++, type, ticket, stage });
+    const fixWork = p.fixWork / p.speed;
+
+    const normal = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+    const lognormal = (mean, cv) => {
+      if (!p.variability || mean <= 0 || cv <= 0) return mean;
+      const s2 = Math.log(1 + cv * cv);
+      return Math.exp(Math.log(mean) - s2 / 2 + Math.sqrt(s2) * normal());
+    };
+    const waitSample = mean => (p.variability ? rand() * 2 * mean : mean);
+    const poisson = l => {
+      const limit = Math.exp(-l);
+      let k = 0, x = rand();
+      while (x > limit) { k++; x *= rand(); }
+      return k;
+    };
+
+    const groups = stages.map(s => ({ free: s.people, queue: [], busy: 0, midQueue: 0 }));
+    const tickets = [];
+    const seg = (t, stage, kind, days) => { if (days > 0) t.segs.push({ stage, kind, days }); };
+
+    function newTicket() {
+      const t = {
+        id: tickets.length, born: now, done: null, loops: 0, fixing: false, rejections: [], segs: [],
+        defects: p.loops ? {
+          functional: poisson(p.functionalDefects),
+          security: poisson(p.securityDefects),
+          performance: poisson(p.performanceDefects),
+        } : { functional: 0, security: 0, performance: 0 },
+      };
+      tickets.push(t);
+      enter(t, 0);
+    }
+
+    function enter(t, i) {
+      const w = waitSample(stages[i].wait);
+      seg(t, i, 'policy', w);
+      schedule(now + w, 'join', t, i);
+      t.priority = 1;
+    }
+
+    function start(t, i, joined) {
+      const g = groups[i], s = stages[i];
+      seg(t, i, 'load', now - joined);
+      const repeat = t.loops > 0 && i > 0 ? p.recheckShare : 1;
+      let work = t.fixing && i === 0 ? lognormal(fixWork, 0.75) : lognormal(s.work * repeat, s.cv);
+      seg(t, i, 'work', work);
+      if (i === 0 && debt > 0) { seg(t, i, 'interrupted', debt); work += debt; debt = 0; }
+      if (g.free !== INF) g.free--;
+      g.busy += work;
+      schedule(now + work, 'finish', t, i);
+    }
+
+    function tryStart(i) {
+      const g = groups[i];
+      while (g.free > 0 && g.queue.length) {
+        let best = 0;
+        for (let k = 1; k < g.queue.length; k++) {
+          const a = g.queue[k], b = g.queue[best];
+          if (a.priority < b.priority || (a.priority === b.priority && a.order < b.order)) best = k;
+        }
+        const [entry] = g.queue.splice(best, 1);
+        start(entry.ticket, i, entry.joined);
+      }
+    }
+
+    function backToDevelopment(t, gate) {
+      t.loops++;
+      t.fixing = true;
+      const rp = p.returnPolicy;
+      if (rp === 'fixNow') {
+        const g = groups[0];
+        t.priority = 0;
+        if (g.free > 0) { schedule(now, 'join', t, 0); return; }
+        // The developer drops what they are doing. The fix is immediate and the
+        // interrupted work pays for it, as extra time on the next job started.
+        const work = lognormal(fixWork, 0.75);
+        seg(t, 0, 'work', work);
+        g.busy += work;
+        debt += work;
+        schedule(now + work, 'fixed', t, 0);
+        return;
+      }
+      const triage = waitSample(p.triageWait);
+      seg(t, 0, 'triage', triage);
+      if (rp === 'front') {
+        t.priority = 0;
+        schedule(now + triage, 'join', t, 0);
+      } else {
+        const w = waitSample(stages[0].wait);
+        seg(t, 0, 'policy', w);
+        t.priority = rp === 'behind' ? 2 : 1;
+        schedule(now + triage + w, 'join', t, 0);
+      }
+    }
+
+    function afterFix(t) {
+      t.fixing = false;
+      if (rand() < p.fixAddsDefect) t.defects.functional++;
+      enter(t, 1);
+    }
+
+    function gate(t, i) {
+      const s = stages[i];
+      let caught = 0;
+      if (p.loops) {
+        if (s.detects) {
+          const n = t.defects[s.detects];
+          for (let k = 0; k < n; k++) if (rand() < s.detection) caught++;
+          t.defects[s.detects] = n - caught;
+        }
+        if (caught > 0 || rand() < s.noDefect) {
+          t.rejections.push({ gate: i, defect: caught > 0 });
+          backToDevelopment(t, i);
+          return;
+        }
+      }
+      if (i === stages.length - 1) t.done = now;
+      else enter(t, i + 1);
+    }
+
+    // Arrivals
+    if (p.competition === 'none') {
+      for (let t = 0; t < horizon; t += 1) schedule(t, 'arrive');
+    } else if (p.competition === 'sprint') {
+      const batch = Math.max(1, Math.floor(3 * p.sprintDays / stages[0].work * p.sprintFill));
+      for (let t = 0; t < horizon; t += p.sprintDays) for (let k = 0; k < batch; k++) schedule(t, 'arrive');
+    } else {
+      let t = 0;
+      while (t < horizon) {
+        schedule(t, 'arrive');
+        t += p.variability ? -Math.log(1 - rand()) / p.ticketsPerDay : 1 / p.ticketsPerDay;
+      }
+    }
+
+    let order = 0, midTaken = false;
+    while (events.size) {
+      const e = events.pop();
+      if (e.t > horizon) break;
+      now = e.t;
+      if (!midTaken && now > horizon / 2) {
+        groups.forEach(g => { g.midQueue = g.queue.length; });
+        midTaken = true;
+      }
+      if (e.type === 'arrive') newTicket();
+      else if (e.type === 'join') {
+        const g = groups[e.stage];
+        g.queue.push({ ticket: e.ticket, joined: now, priority: e.ticket.priority, order: order++ });
+        tryStart(e.stage);
+      } else if (e.type === 'finish') {
+        const g = groups[e.stage];
+        if (g.free !== INF) g.free++;
+        if (e.ticket.fixing && e.stage === 0) afterFix(e.ticket);
+        else gate(e.ticket, e.stage);
+        tryStart(e.stage);
+      } else if (e.type === 'fixed') afterFix(e.ticket);
+    }
+
+    return summarise(p, stages, tickets, groups, horizon);
+  }
+
+  function summarise(p, stages, tickets, groups, horizon) {
+    const measured = tickets.filter(t => t.born >= p.warmup && t.born < p.warmup + p.window);
+    const finished = measured.filter(t => t.done !== null);
+    const elapsed = finished.map(t => t.done - t.born).sort((a, b) => a - b);
+    const unfinished = measured.length - finished.length;
+    // Unfinished tickets are slower than every finished one, so percentiles count them.
+    const pct = q => {
+      if (!measured.length) return null;
+      const k = Math.min(measured.length - 1, Math.floor(q * measured.length));
+      return k < elapsed.length ? elapsed[k] : null;
+    };
+    const sum = a => a.reduce((x, y) => x + y, 0);
+    const split = { work: 0, policy: 0, load: 0, triage: 0, interrupted: 0 };
+    finished.forEach(t => t.segs.forEach(s => { split[s.kind] += s.days; }));
+    Object.keys(split).forEach(k => { split[k] = finished.length ? split[k] / finished.length : 0; });
+
+    const rejectionsByGate = stages.map(() => ({ defect: 0, noDefect: 0 }));
+    measured.forEach(t => t.rejections.forEach(r => { rejectionsByGate[r.gate][r.defect ? 'defect' : 'noDefect']++; }));
+
+    const pickJourney = t => t && {
+      elapsed: t.done === null ? null : t.done - t.born,
+      loops: t.loops,
+      rejections: t.rejections.map(r => ({ gate: stages[r.gate].name, defect: r.defect })),
+      segs: t.segs.map(s => ({ stage: stages[s.stage].name, kind: s.kind, days: s.days })),
+    };
+    const byElapsed = [...finished].sort((a, b) => (a.done - a.born) - (b.done - b.born));
+
+    const groupStats = stages.map((s, i) => {
+      const g = groups[i];
+      const finite = s.people !== INF;
+      const busyShare = finite ? g.busy / (s.people * horizon) : null;
+      return {
+        name: s.name, people: s.people, busyShare,
+        queueAtEnd: g.queue.length, queueAtMiddle: g.midQueue,
+        growing: finite && g.queue.length > 20 && g.queue.length > 1.5 * g.midQueue,
+      };
+    });
+
+    // Mean days per finished ticket at each stage, by what the time was spent on.
+    const byStage = stages.map(s => ({ name: s.name, policy: 0, load: 0, work: 0, triage: 0, interrupted: 0 }));
+    finished.forEach(t => t.segs.forEach(s => { byStage[s.stage][s.kind] += s.days; }));
+    byStage.forEach(b => ['policy', 'load', 'work', 'triage', 'interrupted'].forEach(k => {
+      b[k] = finished.length ? b[k] / finished.length : 0;
+    }));
+
+    return {
+      params: p,
+      tickets: measured.length,
+      finished: finished.length,
+      unfinished,
+      mean: elapsed.length ? sum(elapsed) / elapsed.length : null,
+      p50: pct(0.5), p90: pct(0.9), p95: pct(0.95), p99: pct(0.99),
+      max: unfinished ? null : elapsed[elapsed.length - 1] ?? null,
+      overMonths: measured.length ? (elapsed.filter(e => e > MONTHS_DAYS).length + unfinished) / measured.length : 0,
+      firstTimeThrough: finished.length ? finished.filter(t => t.loops === 0).length / finished.length : 0,
+      meanLoops: measured.length ? sum(measured.map(t => t.loops)) / measured.length : 0,
+      escaped: finished.length ? finished.filter(t => t.defects.functional + t.defects.security + t.defects.performance > 0).length / finished.length : 0,
+      split,
+      byStage,
+      throughput: finished.length / p.window,
+      rejectionsByGate: rejectionsByGate.map((r, i) => ({ gate: stages[i].name, ...r })),
+      groups: groupStats,
+      growing: groupStats.filter(g => g.growing).map(g => g.name),
+      journeys: {
+        typical: pickJourney(byElapsed[Math.floor(byElapsed.length / 2)]),
+        slowest: pickJourney(byElapsed[byElapsed.length - 1]),
+      },
+    };
+  }
+
+  // Elapsed days one rejection adds, with nobody competing for anyone's time.
+  function loopCost(input, gateIndex) {
+    const p = { ...DEFAULTS, ...input, competition: 'none', variability: false };
+    const s = processFor(p);
+    const back = { fixNow: 0, front: p.triageWait, back: p.triageWait + s[0].wait, behind: p.triageWait + s[0].wait }[p.returnPolicy];
+    let days = back + p.fixWork / p.speed;
+    for (let i = 1; i <= gateIndex; i++) days += s[i].wait + s[i].work * p.recheckShare;
+    return days;
+  }
+
+  // One random run is noisy, so results are averaged over several and keep their spread.
+  function runMany(input, runs = 6) {
+    const p = { ...DEFAULTS, ...input };
+    const random = p.variability || p.loops;
+    const all = [];
+    for (let i = 0; i < (random ? runs : 1); i++) all.push(simulate({ ...p, seed: p.seed + i }));
+    const avg = get => {
+      const v = all.map(get);
+      return v.some(x => x === null || x === undefined) ? null : v.reduce((a, b) => a + b, 0) / v.length;
+    };
+    const first = all[0];
+    const means = all.map(r => r.mean).filter(x => x !== null);
+    return {
+      params: p,
+      runs: all.length,
+      tickets: first.tickets,
+      unfinished: avg(r => r.unfinished),
+      mean: avg(r => r.mean),
+      meanLow: Math.min(...means), meanHigh: Math.max(...means),
+      p50: avg(r => r.p50), p90: avg(r => r.p90), p95: avg(r => r.p95),
+      overMonths: avg(r => r.overMonths),
+      firstTimeThrough: avg(r => r.firstTimeThrough),
+      meanLoops: avg(r => r.meanLoops),
+      escaped: avg(r => r.escaped),
+      throughput: avg(r => r.throughput),
+      split: Object.fromEntries(Object.keys(first.split).map(k => [k, avg(r => r.split[k])])),
+      byStage: first.byStage.map((b, i) => ({
+        name: b.name,
+        ...Object.fromEntries(['policy', 'load', 'work', 'triage', 'interrupted'].map(k => [k, avg(r => r.byStage[i][k])])),
+      })),
+      rejectionsByGate: first.rejectionsByGate.map((g, i) => ({
+        gate: g.gate,
+        defect: avg(r => r.rejectionsByGate[i].defect / r.tickets),
+        noDefect: avg(r => r.rejectionsByGate[i].noDefect / r.tickets),
+      })),
+      groups: first.groups.map((g, i) => ({
+        name: g.name, people: g.people,
+        busyShare: g.busyShare === null ? null : avg(r => r.groups[i].busyShare),
+        growing: all.filter(r => r.groups[i].growing).length * 2 >= all.length,
+      })),
+      get growing() { return this.groups.filter(g => g.growing).map(g => g.name); },
+      journeys: first.journeys,
+    };
+  }
+
+  return { STAGES, DEFAULTS, MONTHS_DAYS, simulate, runMany, loopCost, processFor };
+})();
+globalThis.Model = Model;
+</script>
+<script id="page">
+// The page: a thin shell over Model. Throwaway.
+(() => {
+  const $ = id => document.getElementById(id);
+  const KINDS = [
+    ['work', 'Being worked on', '--work'],
+    ['policy', 'Policy wait', '--policy'],
+    ['load', 'Load wait', '--load'],
+    ['triage', 'Waiting to be prioritised', '--triage'],
+    ['interrupted', 'Paying for an interruption', '--interrupted'],
+  ];
+  const ARTICLE_TOTALS = { 'Code review': '10', 'Merge': '12 or 13', 'Testing': '17', 'Security testing': '21', 'Performance testing': '25' };
+
+  const days = x => (x === null || x === undefined ? 'not finished' : x.toFixed(1));
+  const pct = x => (x === null || x === undefined ? '–' : `${Math.round(x * 100)}%`);
+  const one = x => (x === null || x === undefined ? '–' : x > 0 && x < 0.05 ? '<0.1' : x.toFixed(1));
+
+  const GROUPS = [
+    { key: 'loops', label: 'Loops', options: [[false, 'Off'], [true, 'On']] },
+    { key: 'competition', label: 'Who competes for people', options: [['none', 'Nobody'], ['sprint', 'Developers, in a full sprint'], ['team', 'The whole team']] },
+    { key: 'variability', label: 'Tickets and waits', options: [[false, 'All identical'], [true, 'Vary, as real ones do']] },
+    { key: 'speed', label: 'Developer speed', options: [[0.5, 'Twice as slow'], [1, 'As in the article'], [2, 'Twice as fast']] },
+    { key: 'returnPolicy', label: 'A rejected ticket goes', options: [['fixNow', 'Fixed right now'], ['front', 'To the front of the line'], ['back', 'To the back of the line'], ['behind', 'Behind all deadline work']] },
+    { key: 'ticketsPerDay', label: 'New tickets per day (whole team only)', options: [[0.8, '0.8'], [1, '1.0'], [1.1, '1.1'], [1.2, '1.2'], [1.4, '1.4']] },
+    { key: 'functionalDefects', label: 'Functional defects per new ticket (assumption)', options: [[0.1, '0.1'], [0.25, '0.25'], [0.5, '0.5'], [1, '1']] },
+    { key: 'noDefectScale', label: 'Rejections with no defect', options: [[0, 'None'], [1, 'At the default rates']] },
+    { key: 'recheckShare', label: 'A repeat pass through a gate takes', options: [[0.5, 'Half as long'], [1, 'As long as the first']] },
+  ];
+
+  const WALKS = [
+    {
+      title: "The article's sums",
+      intro: 'No loops, nobody competing, every ticket the same, and every wait set directly. Check the "Running total" column against "Article".',
+      steps: [
+        { label: "Run the article's process", patch: {}, note: 'The totals match: 10.1, 12.1, 17.1, 25.1. This only shows the process was entered correctly. The model adds up the figures the article gave it, so it is no evidence yet.' },
+        { label: 'Developer twice as fast', patch: { speed: 2 }, note: 'Article says 24. Model says 24.1, because a day of development comes off and nothing else moves.' },
+        { label: 'Developer twice as slow', patch: { speed: 0.5 }, note: 'Article says 27. Model says 27.1. Both checks assume the 5-day development wait has nothing to do with how fast developers work. The next walkthrough tests that.' },
+      ],
+    },
+    {
+      title: 'Is the wait policy or load?',
+      intro: "The article's 5-day development wait comes from two weeks of work being assigned at once. Does it stay 5 days when the developer's speed changes? It depends on what causes the wait.",
+      steps: [
+        { label: 'Let waits come from busy people', patch: { competition: 'team', variability: true }, note: '1.4 new tickets a day with 3 developers and 4 testers lands near 25 days. Development wait now appears as load wait, not a typed-in 5. The team sizes and arrival rate were fitted to do this.' },
+        { label: 'Developer twice as fast', patch: { speed: 2 }, note: 'About 19 days, not 24. Developers are now rarely busy, so the load wait collapses as well as the work. The article\'s check does not hold here.' },
+        { label: 'Developer twice as slow', patch: { speed: 0.5 }, note: 'The article says 27. Here developers cannot keep up, so the line grows for as long as the simulation runs. The figure is meaningless: run it longer and it gets bigger.' },
+        { label: 'Now plan work in full sprints', patch: { competition: 'sprint', variability: false, speed: 1 }, note: 'Each sprint gets as many tickets as the developers can finish. The wait now emerges from the sprint and comes to 4 days, close to the article\'s 5. Note tickets finished per day.' },
+        { label: 'Sprint: twice as fast', patch: { competition: 'sprint', speed: 2 }, note: 'Elapsed time barely moves, as the article says, because the sprint just takes on more. But tickets finished per day doubles. The per-ticket view hides that.' },
+        { label: 'Sprint: twice as slow', patch: { competition: 'sprint', speed: 0.5 }, note: 'Same again: about 1.5 days longer per ticket, while the team finishes less than half as many. "Hardly matters" is true for one ticket and false for the team.' },
+      ],
+    },
+    {
+      title: 'What one loop costs',
+      intro: 'No published rates are needed here, only the article\'s own waits. Watch the "Cost of one loop" table, which adds up the journey back through the gates after one rejection.',
+      steps: [
+        { label: 'Back of the line', patch: { returnPolicy: 'back' }, note: 'A rejection at the last gate adds 24.4 days, as much as the whole ticket took. Only 6.25 of that is getting back to a developer and fixing it.' },
+        { label: 'Front of the line', patch: { returnPolicy: 'front' }, note: 'Skipping the development wait saves 5 days per loop. A late rejection still costs 19.4 days.' },
+        { label: 'Original developer fixes it right now', patch: { returnPolicy: 'fixNow' }, note: 'Even an instant fix leaves 18.4 days at the last gate. The bulk of a loop is going back through the other gates, so how quickly a developer responds is not the main cost.' },
+        { label: 'Repeat passes take half as long', patch: { returnPolicy: 'back', recheckShare: 0.5 }, note: 'Assumes a small fix needs less checking. It helps, but the policy waits at each gate are untouched. The article says every loop revisits all the gates; it does not say how long a repeat pass takes.' },
+      ],
+    },
+    {
+      title: 'Loops at default rates',
+      intro: 'Loops on with nobody competing, so anything slow here comes from loops alone. Defect rates are assumptions and detection rates are published: see "Where the numbers come from".',
+      steps: [
+        { label: 'Turn loops on', patch: { loops: true, variability: true }, note: 'The typical ticket is only modestly worse, but about a third pass two months, with no queueing for people at all. Under half get through first time.' },
+        { label: 'Remove rejections with no defect', patch: { noDefectScale: 0 }, note: 'A large part of the slowness goes. Those rejections are mostly assumed rates, so a large part of the months result rests on them.' },
+        { label: 'Back on, half the defects', patch: { noDefectScale: 1, functionalDefects: 0.25 }, note: 'Halving the defects only moves "over two months" from about 34% to 29%, because rejections with no defect keep the loops going.' },
+        { label: 'Double the defects', patch: { noDefectScale: 1, functionalDefects: 1 }, note: 'Now about 46%. No credible figure exists for this input, so the range across these runs is the honest result, not any single row.' },
+      ],
+    },
+    {
+      title: 'Back of the line',
+      intro: 'A rejected ticket competes with everything else. Should the developer fix it now, follow the policy and wait, or is new deadline work taking priority? Watch "Over two months" in the runs table.',
+      steps: [
+        { label: 'Team with slack: fixed right now', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1, returnPolicy: 'fixNow' }, note: 'At 1 ticket a day people have some slack, though testers are already about 87% busy.' },
+        { label: 'Team with slack: back of the line', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1, returnPolicy: 'back' }, note: 'A modest penalty for following the policy.' },
+        { label: 'Team with slack: behind deadline work', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1, returnPolicy: 'behind' }, note: 'External pressure: new work always goes first, so rejected tickets wait for a gap. Worse, but not dramatic while gaps exist.' },
+        { label: 'Busy team: fixed right now', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1.2, returnPolicy: 'fixNow' }, note: 'Only slightly more work arriving, and most tickets now take months. Fixing right now does not rescue it, because testing is full.' },
+        { label: 'Busy team: behind deadline work', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1.2, returnPolicy: 'behind' }, note: 'The worst case here: overloaded, with new work jumping the line. See the slowest ticket\'s journey.' },
+      ],
+    },
+    {
+      title: 'How busy is too busy?',
+      intro: 'The same team with loops on and rejected tickets at the back of the line. Only the number of new tickets changes. Watch how busy Testing gets, and "Over two months".',
+      steps: [
+        { label: '0.8 tickets a day', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 0.8 }, note: 'Loops add a tail, not a disaster.' },
+        { label: '1.0 tickets a day', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1 }, note: 'Still stable.' },
+        { label: '1.1 tickets a day', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1.1 }, note: 'Testing is near its limit.' },
+        { label: '1.2 tickets a day', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1.2 }, note: 'A 20% increase on 1.0 takes the typical ticket from under 30 days to about 70.' },
+        { label: '1.4 tickets a day', patch: { competition: 'team', loops: true, variability: true, ticketsPerDay: 1.4 }, note: 'This is the load that reproduced 25 days with loops off. With loops on, repeat passes push people past capacity and the line never clears. So a team that looks healthy with no loops has no room for them.' },
+      ],
+    },
+  ];
+
+  let params = { ...Model.DEFAULTS };
+  let result = null, previous = null;
+  let history = [];
+  let walk = 0, stepIndex = 0, lastNote = null, label = 'Starting point';
+
+  function run(nextLabel) {
+    previous = result;
+    result = Model.runMany(params);
+    label = nextLabel;
+    history.push({
+      label,
+      p50: result.p50, p95: result.p95, mean: result.mean,
+      overMonths: result.overMonths, throughput: result.throughput,
+      growing: result.growing.length > 0,
+    });
+    history = history.slice(-12);
+    render();
+  }
+
+  function renderChanged() {
+    if (!previous) return '';
+    const parts = [];
+    const compare = (name, a, b, fmt) => { if (fmt(a) !== fmt(b)) parts.push(`${name} ${fmt(a)} → ${fmt(b)}`); };
+    compare('typical ticket', previous.p50, result.p50, days);
+    compare('slow ticket', previous.p95, result.p95, days);
+    compare('over two months', previous.overMonths, result.overMonths, pct);
+    compare('tickets finished per day', previous.throughput, result.throughput, x => x.toFixed(2));
+    return `<div class="changed"><strong>What just changed:</strong> ${parts.length ? parts.join('; ') : 'nothing visible'}.</div>`;
+  }
+
+  function bar(split) {
+    const total = KINDS.reduce((a, [k]) => a + (split[k] || 0), 0) || 1;
+    return `<div class="bar" role="img" aria-label="How the time was spent">${KINDS.map(([k, name, colour]) => {
+      const v = split[k] || 0;
+      return v > 0 ? `<span style="width:${(v / total) * 100}%;background:var(${colour})" title="${name}: ${v.toFixed(1)} days"></span>` : '';
+    }).join('')}</div>`;
+  }
+
+  function legend(split) {
+    return `<div class="legend">${KINDS.filter(([k]) => split[k] > 0.005).map(([k, name, colour]) =>
+      `<span><span class="swatch" style="background:var(${colour})"></span>${name} ${split[k].toFixed(1)}</span>`).join('')}</div>`;
+  }
+
+  function journey(title, j) {
+    if (!j) return '';
+    const split = {};
+    j.segs.forEach(s => { split[s.kind] = (split[s.kind] || 0) + s.days; });
+    const stops = j.rejections.length
+      ? j.rejections.map(r => `${r.gate} (${r.defect ? 'defect' : 'no defect'})`).join(', then ')
+      : 'no rejections';
+    const segs = j.segs.map(s => {
+      const colour = KINDS.find(([k]) => k === s.kind)[2];
+      const name = KINDS.find(([k]) => k === s.kind)[1];
+      return `<span style="flex:${s.days} 0 0;background:var(${colour});border-right:1px solid var(--panel)" title="${s.stage}, ${name}: ${s.days.toFixed(1)} days"></span>`;
+    }).join('');
+    return `<div class="journey"><div class="small"><strong>${title}:</strong> ${days(j.elapsed)} days, ${j.loops} loop${j.loops === 1 ? '' : 's'}. Rejected at: ${stops}.</div><div class="bar">${segs}</div></div>`;
+  }
+
+  function renderState() {
+    const r = result;
+    const warn = r.growing.length
+      ? `<div class="warning"><strong>The line at ${r.growing.join(' and ')} never stops growing.</strong> Run this longer and the numbers get bigger, so read them as "this never clears", not as a measurement.</div>`
+      : '';
+    const tile = (value, name) => `<div class="tile"><div class="value">${value}</div><div class="label">${name}</div></div>`;
+    let running = 0;
+    const rows = r.byStage.map((b, i) => {
+      const own = b.policy + b.load + b.work + b.triage + b.interrupted;
+      running += own;
+      const g = r.groups[i];
+      const rej = r.rejectionsByGate[i];
+      return `<tr><td>${b.name}</td><td>${one(b.policy + b.triage)}</td><td>${one(b.load)}</td><td>${one(b.work + b.interrupted)}</td><td><strong>${running.toFixed(1)}</strong></td><td>${ARTICLE_TOTALS[b.name] || '7'}</td><td>${g.busyShare === null ? 'always free' : `${pct(g.busyShare)} of ${g.people}`}</td><td>${i === 0 ? '–' : `${Math.round((rej.defect) * 100)} / ${Math.round((rej.noDefect) * 100)}`}</td></tr>`;
+    }).join('');
+    const loopRows = Model.STAGES.slice(1).map((s, i) => {
+      const cost = Model.loopCost(params, i + 1);
+      return `<tr><td>${s.name}</td><td>${cost.toFixed(1)}</td></tr>`;
+    }).join('');
+    const historyRows = [...history].reverse().map((h, i) =>
+      `<tr class="${i === 0 ? 'current' : ''}"><td class="text">${h.label}</td><td>${days(h.p50)}</td><td>${days(h.p95)}</td><td>${pct(h.overMonths)}</td><td>${h.throughput.toFixed(2)}</td><td class="text">${h.growing ? 'never clears' : ''}</td></tr>`).join('');
+
+    $('state').innerHTML = `
+      <section class="panel">
+        <h2>Result: ${label}</h2>
+        ${warn}
+        ${renderChanged()}
+        <div class="tiles">
+          ${tile(days(r.p50), 'days, typical ticket (median)')}
+          ${tile(days(r.p95), 'days, slow ticket (1 in 20)')}
+          ${tile(pct(r.overMonths), 'take over two months')}
+          ${tile(pct(r.firstTimeThrough), 'pass first time')}
+          ${tile(r.meanLoops.toFixed(2), 'loops per ticket')}
+          ${tile(r.throughput.toFixed(2), 'tickets finished per day')}
+          ${tile(pct(r.escaped), 'reach production with an escaped defect')}
+        </div>
+        ${bar(r.split)}
+        ${legend(r.split)}
+        <p class="muted small" style="margin-top:8px">Average ${days(r.mean)} days${r.runs > 1 ? `, averaged over ${r.runs} runs of about ${r.tickets.toLocaleString()} tickets each (run averages ${r.meanLow.toFixed(1)} to ${r.meanHigh.toFixed(1)})` : ''}.</p>
+      </section>
+      <section class="panel">
+        <h2>Runs so far</h2>
+        <div class="scroll"><table><thead><tr><th>Run</th><th>Typical</th><th>Slow (1 in 20)</th><th>Over two months</th><th>Finished per day</th><th class="text"></th></tr></thead><tbody>${historyRows}</tbody></table></div>
+      </section>
+      <section class="panel">
+        <h2>Where a ticket's days go, stage by stage</h2>
+        <div class="scroll"><table><thead><tr><th>Stage</th><th>Policy wait</th><th>Load wait</th><th>Work</th><th>Running total</th><th>Article</th><th>How busy</th><th style="white-space:normal;min-width:110px">Rejected per 100 tickets (defect / none)</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="muted small" style="margin-top:8px">The article gives no total at development; 7 is its 5-day wait plus 2 days of work. It gives no total at security testing either; 21 is 17 plus its 4 days. With loops on, days include every repeat pass.</p>
+      </section>
+      <section class="panel">
+        <h2>Cost of one loop</h2>
+        <div class="scroll"><table><thead><tr><th>Rejected at</th><th>Elapsed days added, with nobody competing</th></tr></thead><tbody>${loopRows}</tbody></table></div>
+        <p class="muted small" style="margin-top:8px">Uses the current choice of where a rejected ticket goes and how long a repeat pass takes. Assumes a 1-day wait to be prioritised (except "right now") and a quarter-day fix.</p>
+      </section>
+      <section class="panel">
+        <h2>Two tickets from this run</h2>
+        ${journey('A typical ticket', r.journeys.typical)}
+        ${journey('The slowest ticket that finished', r.journeys.slowest)}
+        <p class="muted small">Each block is one wait or one piece of work. Hover over a block for the stage.</p>
+      </section>
+      <section class="panel">
+        <h2>Where the numbers come from</h2>
+        <div class="scroll"><table><thead><tr><th>Input</th><th>Value</th><th class="text">Evidence</th></tr></thead><tbody>
+          <tr><td>Waits and work at each stage</td><td>5, 2, 3, ⅛, 2, 2.5, 2.5, 2+2, 2+2</td><td class="text">Article's estimates. Split of testing, security and performance is mine, to land on its totals</td></tr>
+          <tr><td>Code review detection</td><td>30%</td><td class="text">Published: survey median, range 8.5% to 92.7%, mostly older inspections</td></tr>
+          <tr><td>Testing detection</td><td>50%</td><td class="text">Published: survey mean, range 7% to 89%, seeded defects, so probably high</td></tr>
+          <tr><td>Security testing detection</td><td>52%</td><td class="text">Published: one static analysis tool, C and C++ only</td></tr>
+          <tr><td>Merge conflict rejection</td><td>15%</td><td class="text">Published, second-hand: 10% to 20%, open source</td></tr>
+          <tr><td>Fix takes</td><td>¼ day</td><td class="text">Article: "minutes to hours"</td></tr>
+          <tr><td>Defects per new ticket</td><td>0.5, 0.05, 0.05</td><td class="text"><strong>Assumption.</strong> No credible figure exists, and this drives the loops</td></tr>
+          <tr><td>Other rejections with no defect</td><td>15%, 5%, 5%, 2%</td><td class="text"><strong>Assumption</strong></td></tr>
+          <tr><td>Performance testing detection</td><td>50%</td><td class="text"><strong>Assumption</strong></td></tr>
+          <tr><td>A fix adds a defect</td><td>15%</td><td class="text"><strong>Assumption</strong></td></tr>
+          <tr><td>Wait to be prioritised</td><td>1 day</td><td class="text"><strong>Assumption.</strong> The article names this wait with no figure</td></tr>
+          <tr><td>Team sizes and tickets per day</td><td>3, 1, 4, 4, 4; 1.4</td><td class="text"><strong>Fitted</strong> to land near 25 days with loops off, along with 1.6 days' scheduling at security and performance testing</td></tr>
+        </tbody></table></div>
+      </section>`;
+  }
+
+  function renderFree() {
+    $('free').innerHTML = `<h2>Free play</h2>${GROUPS.map(g => `
+      <div class="group"><div class="group-label">${g.label}</div><div class="buttons">
+        ${g.options.map(([v, text], i) => `<button data-group="${g.key}" data-option="${i}" class="${params[g.key] === v ? 'on' : ''}" aria-pressed="${params[g.key] === v}">${text}</button>`).join('')}
+      </div></div>`).join('')}
+      <div class="buttons"><button id="resample">New random runs</button><button id="reset">Reset everything</button></div>`;
+  }
+
+  function renderWalks() {
+    const w = WALKS[walk];
+    $('walks').innerHTML = `<h2>Walkthroughs</h2>
+      <div class="tabs">${WALKS.map((x, i) => `<button data-walk="${i}" class="${i === walk ? 'on' : ''}">${x.title}</button>`).join('')}</div>
+      <p class="small">${w.intro}</p>
+      ${w.steps.map((s, i) => `<button class="step ${i === stepIndex ? 'next' : ''} ${i < stepIndex ? 'done' : ''}" data-step="${i}">${i + 1}. ${s.label}</button>`).join('')}
+      ${lastNote ? `<div class="note">${lastNote}</div>` : ''}`;
+  }
+
+  function render() { renderState(); renderFree(); renderWalks(); }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.group) {
+      const g = GROUPS.find(x => x.key === b.dataset.group);
+      const [v, text] = g.options[+b.dataset.option];
+      params = { ...params, [g.key]: v };
+      run(`${g.label}: ${text}`);
+    } else if (b.dataset.walk !== undefined) {
+      walk = +b.dataset.walk; stepIndex = 0; lastNote = null;
+      params = { ...Model.DEFAULTS };
+      history = [];
+      result = null;
+      run('Starting point');
+    } else if (b.dataset.step !== undefined) {
+      const i = +b.dataset.step;
+      const s = WALKS[walk].steps[i];
+      params = { ...params, ...s.patch };
+      stepIndex = i + 1;
+      lastNote = s.note;
+      run(s.label);
+    } else if (b.id === 'resample') {
+      params = { ...params, seed: params.seed + 100 };
+      run('New random runs');
+    } else if (b.id === 'reset') {
+      params = { ...Model.DEFAULTS };
+      history = [];
+      result = null;
+      lastNote = null;
+      stepIndex = 0;
+      run('Starting point');
+    }
+  });
+
+  run('Starting point');
+})();
+</script>
+</body>
+</html>
