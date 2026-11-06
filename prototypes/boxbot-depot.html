@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boxbot Depot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&family=Silkscreen:wght@400;700&display=swap">
+<style>
+  /* Layout: one arcade cabinet column, floor on top, controls under the player's thumbs. */
+  :root {
+    color-scheme: dark;
+    --bg: #211a33; --panel: #2e2547; --panel-2: #3a2f5a; --line: #52447c;
+    --ink: #f4ecd8; --dim: #b9aed0;
+    --mustard: #f2c14e; --tomato: #e8603c; --teal: #4cc9b8;
+    --display: "Silkscreen", ui-monospace, Menlo, monospace;
+    --body: "Pixelify Sans", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink); font: 400 17px/1.35 var(--body);
+    margin: 0; padding-block: 16px 32px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .cab { max-width: 880px; margin: 0 auto; display: grid; gap: 10px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; }
+  h1 { font: 700 26px/1.1 var(--display); margin: 0; color: var(--mustard); letter-spacing: 0.02em; }
+  .levels { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; font-family: var(--display); font-size: 14px; }
+  .hud div { background: var(--panel); padding: 5px 8px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .hud b { color: var(--mustard); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hud small { display: block; font-size: 10px; color: var(--dim); }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 4px solid var(--line); touch-action: none; cursor: crosshair; background: #2b3a4a; }
+  canvas:focus-visible { outline: 3px solid var(--mustard); outline-offset: 2px; }
+  .msg { background: var(--panel); padding: 10px 12px; min-height: 66px; }
+  .msg strong { font-family: var(--display); font-size: 15px; color: var(--teal); font-weight: 400; display: block; margin-bottom: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    font: 400 14px/1.2 var(--display); color: var(--ink); background: var(--panel-2);
+    border: 0; border-bottom: 3px solid #1a1429; padding: 8px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--line); }
+  button:active:not(:disabled) { border-bottom-width: 1px; margin-top: 2px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible { outline: 3px solid var(--mustard); outline-offset: 1px; }
+  button.go { background: var(--tomato); color: #fff8ec; }
+  button.on { background: var(--mustard); color: #2a1f0a; }
+  .shop { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; }
+  .shop button { text-align: left; font: 400 16px/1.25 var(--body); display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: start; }
+  .shop b { font: 400 13px var(--display); color: var(--mustard); }
+  .shop span { grid-column: 1 / -1; font-size: 15px; color: var(--dim); }
+  h2 { font: 400 14px var(--display); color: var(--dim); margin: 6px 0 0; }
+  .bar { display: flex; height: 18px; margin: 8px 0 4px; background: #1a1429; }
+  .bar i { display: block; height: 100%; }
+  .key { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 15px; }
+  .key i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
+  .stars { font: 700 20px var(--display); color: var(--mustard); }
+  footer { font-size: 15px; color: var(--dim); }
+  a { color: var(--teal); }
+</style>
+
+<div class="cab">
+  <header>
+    <h1>Boxbot Depot</h1>
+    <div class="levels" id="levels"></div>
+  </header>
+  <div class="hud">
+    <div><small>COINS</small><b id="coins">0</b></div>
+    <div><small>SHIFT LEFT</small><b id="clock">0</b></div>
+    <div><small>SHIPPED</small><b id="shipped">0</b></div>
+    <div><small>BIGGEST PILE</small><b id="pile">0</b></div>
+  </div>
+  <canvas id="floor" width="256" height="160" tabindex="0" aria-label="Factory floor. Drag or use arrow keys and space to lay pipes between the stations."></canvas>
+  <div class="msg" id="msg" aria-live="polite"></div>
+  <div class="row" id="controls"></div>
+  <h2 id="shopTitle">SHOP</h2>
+  <div class="shop" id="shop"></div>
+  <footer>Inspired by <a href="https://www.industriallogic.com/blog/faster-and-more-predictable/">Faster and More Predictable</a>. One second is one working day. The numbers are tuned for fun, so they prove nothing about your team.</footer>
+</div>
+
+<script id="sim">
+// Pure game rules. No drawing in here.
+const Sim = (() => {
+  const W = 16, H = 10, BOT_SPEED = 5;
+  const TYPES = {
+    dock:  { name: 'DOCK' },
+    shop:  { name: 'WORKSHOP', work: 2 },
+    insp:  { name: 'INSPECTOR', work: 0.8, detect: 0.7, style: 0.12 },
+    lab:   { name: 'TEST LAB', work: 2.5, detect: 0.75, style: 0.05 },
+    truck: { name: 'TRUCK' },
+  };
+  const NOPES = ['STYLE!', 'CONFLICT!', 'NITPICK!'];
+
+  const LEVELS = [
+    {
+      name: 'First Shift', coins: 40, time: 45, every: 3.5, quota: 8, stars: [14, 11], bad: 0, bots: 2, jam: 12,
+      intro: 'Drag across the floor to lay pipe from the dock to the workshop, then on to the truck. Bots only walk on pipe, and every piece costs a coin.',
+      stations: [{ t: 'dock', x: 0, y: 4 }, { t: 'shop', x: 7, y: 1 }, { t: 'truck', x: 14, y: 6 }],
+      rocks: [[4, 3], [4, 4], [4, 5], [4, 6], [10, 4], [10, 5], [10, 6], [10, 7], [11, 4]],
+      shop: ['bot', 'turbo', 'bench'],
+    },
+    {
+      name: 'The Inspector', coins: 50, time: 60, every: 3, quota: 9, stars: [24, 18], bad: 0.35, bots: 2, jam: 12, naps: true,
+      intro: 'The inspector naps a lot, and rejects send a box all the way back to the workshop. Ship a bad box and the customer fines you.',
+      stations: [{ t: 'dock', x: 0, y: 7 }, { t: 'shop', x: 4, y: 1 }, { t: 'insp', x: 9, y: 6 }, { t: 'truck', x: 14, y: 2 }],
+      rocks: [[7, 2], [7, 3], [7, 4], [7, 5], [3, 5], [4, 5], [5, 5], [12, 4], [12, 5], [12, 6], [12, 7]],
+      shop: ['bot', 'turbo', 'wake', 'crewInsp', 'careful'],
+    },
+    {
+      name: 'Test Lab', coins: 60, time: 75, every: 3, quota: 9, stars: [38, 28], bad: 0.35, bots: 3, jam: 12, naps: true,
+      intro: 'A far-off lab joins the line. A reject from the lab goes back through the workshop, the inspector and the lab again. Watch how much of the trip is waiting.',
+      stations: [{ t: 'dock', x: 0, y: 1 }, { t: 'shop', x: 3, y: 7 }, { t: 'insp', x: 8, y: 1 }, { t: 'lab', x: 11, y: 7 }, { t: 'truck', x: 14, y: 1 }],
+      rocks: [[6, 4], [6, 5], [6, 6], [6, 7], [6, 8], [10, 0], [10, 1], [10, 2], [10, 3], [10, 4], [13, 4], [13, 5], [13, 6]],
+      shop: ['bot', 'turbo', 'wake', 'crewInsp', 'crewLab', 'careful'],
+    },
+    {
+      name: 'Rush Order', coins: 70, time: 80, every: 2.6, quota: 14, stars: [32, 26], bad: 0.4, bots: 3, jam: 12, naps: true,
+      intro: 'The boss wants more, faster. Boxes arrive quicker than the line can take them, and any pile over 12 jams the depot. Spend where the piles are.',
+      stations: [{ t: 'dock', x: 0, y: 4 }, { t: 'shop', x: 4, y: 1 }, { t: 'insp', x: 4, y: 7 }, { t: 'lab', x: 10, y: 1 }, { t: 'truck', x: 14, y: 7 }],
+      rocks: [[7, 3], [7, 4], [7, 5], [8, 5], [9, 5], [10, 5], [2, 2], [2, 3], [13, 3], [13, 4], [13, 5]],
+      shop: ['bot', 'turbo', 'wake', 'crewInsp', 'crewLab', 'careful', 'bench'],
+    },
+  ];
+
+  const stationOf = (s, t) => s.stations.find(st => st.t === t);
+  const SHOP = {
+    bot:      { name: 'Hire a bot', desc: 'One more box carrier.', cost: 10, step: 6, buy: s => addBot(s) },
+    turbo:    { name: 'Turbo hammer', desc: 'Workshop works twice as fast.', cost: 14, once: true, buy: s => { stationOf(s, 'shop').work /= 2; s.fixWork /= 2; } },
+    bench:    { name: 'Second workbench', desc: 'Workshop handles two boxes at once.', cost: 18, once: true, buy: s => { stationOf(s, 'shop').crew = 2; } },
+    wake:     { name: 'Wake the inspector', desc: 'No more naps. Inspects all day.', cost: 12, once: true, buy: s => { stationOf(s, 'insp').naps = false; } },
+    crewInsp: { name: 'Second inspector', desc: 'Inspects two boxes at once.', cost: 14, once: true, buy: s => { stationOf(s, 'insp').crew = 2; } },
+    crewLab:  { name: 'Second tester', desc: 'Lab tests two boxes at once.', cost: 18, once: true, buy: s => { stationOf(s, 'lab').crew = 2; } },
+    careful:  { name: 'Check your own work', desc: 'Far fewer bad boxes. Workshop takes half a day longer.', cost: 20, once: true, buy: s => { s.badRate *= 0.4; stationOf(s, 'shop').work += 0.5; } },
+  };
+
+  function rngFrom(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function newLevel(i, seed = Date.now(), keepPipes = null) {
+    const L = LEVELS[i];
+    const grid = Array.from({ length: H }, () => Array(W).fill(0));
+    const owner = Array.from({ length: H }, () => Array(W).fill(-1));
+    L.rocks.forEach(([x, y]) => { grid[y][x] = 1; });
+    const stations = L.stations.map((d, id) => {
+      const T = TYPES[d.t];
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) owner[d.y + dy][d.x + dx] = id;
+      return { id, t: d.t, x: d.x, y: d.y, name: T.name, work: T.work || 0, detect: T.detect || 0, style: T.style || 0,
+        naps: !!L.naps && d.t === 'insp', crew: 1, in: [], out: [], busy: [] };
+    });
+    const s = {
+      i, L, grid, owner, stations, phase: 'build', coins: L.coins, t: 0, nextBox: 0.5,
+      bots: [], boxes: [], done: [], escaped: 0, shipped: 0, bought: {}, prices: {}, paths: new Map(),
+      badRate: L.bad, fixWork: 0.5, events: [], result: null, rand: rngFrom(seed), boxId: 0,
+    };
+    for (let k = 0; k < L.bots; k++) addBot(s);
+    if (keepPipes) keepPipes.forEach(([x, y]) => setPipe(s, x, y, true));
+    return s;
+  }
+
+  function addBot(s) {
+    const d = s.stations[0];
+    s.bots.push({ id: s.bots.length, at: 0, x: d.x + 1, y: d.y + 1, state: 'idle', path: null, i: 0, box: null, dest: 0 });
+  }
+
+  const pipesOf = s => {
+    const out = [];
+    s.grid.forEach((row, y) => row.forEach((c, x) => { if (c === 2) out.push([x, y]); }));
+    return out;
+  };
+
+  function canPipe(s, x, y) {
+    return x >= 0 && y >= 0 && x < W && y < H && s.grid[y][x] === 0 && s.owner[y][x] === -1;
+  }
+
+  // Returns a reason string when the move is refused, or null when it worked.
+  function setPipe(s, x, y, on) {
+    if (x < 0 || y < 0 || x >= W || y >= H) return 'off';
+    if (on) {
+      if (!canPipe(s, x, y)) return 'blocked';
+      if (s.coins < 1) return 'coins';
+      s.grid[y][x] = 2;
+      s.coins -= 1;
+    } else {
+      if (s.grid[y][x] !== 2) return 'blocked';
+      if (s.phase !== 'build') return 'running';
+      s.grid[y][x] = 0;
+      s.coins += 1;
+    }
+    s.paths.clear();
+    return null;
+  }
+
+  const walkable = (s, x, y) => x >= 0 && y >= 0 && x < W && y < H && (s.grid[y][x] === 2 || s.owner[y][x] !== -1);
+
+  // Shortest walk between two stations, as tile-centre points, or null.
+  function path(s, a, b) {
+    const key = `${a}>${b}`;
+    if (s.paths.has(key)) return s.paths.get(key);
+    const A = s.stations[a], B = s.stations[b];
+    const seen = new Map();
+    const queue = [];
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const k = (A.y + dy) * W + A.x + dx;
+      seen.set(k, -1);
+      queue.push(k);
+    }
+    let end = -1;
+    for (let q = 0; q < queue.length && end < 0; q++) {
+      const k = queue[q], x = k % W, y = (k - x) / W;
+      if (s.owner[y][x] === b) { end = k; break; }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy, nk = ny * W + nx;
+        if (walkable(s, nx, ny) && !seen.has(nk)) { seen.set(nk, k); queue.push(nk); }
+      }
+    }
+    let result = null;
+    if (end >= 0) {
+      const cells = [];
+      for (let k = end; k !== -1; k = seen.get(k)) cells.unshift([k % W + 0.5, (k - k % W) / W + 0.5]);
+      result = [[A.x + 1, A.y + 1], ...cells, [B.x + 1, B.y + 1]];
+    }
+    s.paths.set(key, result);
+    return result;
+  }
+
+  const legs = s => s.stations.slice(0, -1).map((st, i) => !!path(s, i, i + 1));
+  const ready = s => legs(s).every(Boolean);
+  const start = s => { if (s.phase === 'build' && ready(s)) s.phase = 'run'; };
+
+  const price = (s, id) => s.prices[id] ?? SHOP[id].cost;
+  function buy(s, id) {
+    const item = SHOP[id];
+    if (s.phase === 'end' || s.coins < price(s, id) || (item.once && s.bought[id])) return false;
+    s.coins -= price(s, id);
+    s.bought[id] = (s.bought[id] || 0) + 1;
+    if (item.step) s.prices[id] = price(s, id) + item.step;
+    item.buy(s);
+    return true;
+  }
+
+  const asleep = (st, t) => st.naps && (t % 10) >= 4;
+  const centre = st => [st.x + 1, st.y + 1];
+  const event = (s, k, st, text) => { const [x, y] = centre(st); s.events.push({ k, x, y, text }); };
+
+  function finishWork(s, st, box) {
+    box.work += box.dur;
+    const n = s.stations;
+    const shopId = stationOf(s, 'shop').id;
+    if (st.t === 'shop') {
+      if (box.fixing) { box.bad = s.rand() < 0.1; box.fixing = false; box.marked = false; }
+      else box.bad = s.rand() < s.badRate;
+      box.next = st.id + 1;
+      st.out.push(box);
+      return;
+    }
+    const caught = box.bad && s.rand() < st.detect;
+    const nope = !caught && s.rand() < st.style;
+    if (caught || nope) {
+      box.loops++;
+      box.fixing = true;
+      box.marked = true;
+      box.next = shopId;
+      event(s, 'reject', st, caught ? 'DEFECT!' : NOPES[Math.floor(s.rand() * NOPES.length)]);
+    } else {
+      box.next = st.id + 1;
+      if (box.next >= n.length) box.next = n.length - 1;
+    }
+    st.out.push(box);
+  }
+
+  function arrive(s, st, box) {
+    if (st.t !== 'truck') { st.in.push(box); return; }
+    box.state = 'done';
+    box.doneAt = s.t;
+    s.shipped++;
+    s.done.push(box);
+    if (box.bad) {
+      s.escaped++;
+      s.coins = Math.max(0, s.coins - 3);
+      event(s, 'oops', st, 'FINE -3');
+    } else {
+      s.coins += 4;
+      event(s, 'ship', st, '+4');
+    }
+  }
+
+  function stepBots(s, dt) {
+    for (const b of s.bots) {
+      if (b.state === 'idle') {
+        let pick = null, from = null;
+        for (const st of s.stations) for (const box of st.out) {
+          if (!box.claimed && (!pick || box.born < pick.born)) { pick = box; from = st; }
+        }
+        if (!pick) continue;
+        pick.claimed = true;
+        b.box = pick;
+        b.pickup = from;
+        b.state = 'fetch';
+        b.path = path(s, b.at, from.id);
+        b.i = 0;
+      }
+      let left = BOT_SPEED * dt;
+      while (left > 0 && b.path && b.i < b.path.length) {
+        const [tx, ty] = b.path[b.i];
+        const d = Math.hypot(tx - b.x, ty - b.y);
+        if (d <= left) { b.x = tx; b.y = ty; b.i++; left -= d; }
+        else { b.x += (tx - b.x) / d * left; b.y += (ty - b.y) / d * left; left = 0; }
+      }
+      if (b.state === 'carry') b.box.carried += dt;
+      if (b.path && b.i >= b.path.length) {
+        if (b.state === 'fetch') {
+          const st = b.pickup;
+          st.out.splice(st.out.indexOf(b.box), 1);
+          b.box.claimed = false;
+          b.at = st.id;
+          b.state = 'carry';
+          b.dest = b.box.next;
+          b.path = path(s, st.id, b.dest);
+          b.i = 0;
+        } else {
+          b.at = b.dest;
+          arrive(s, s.stations[b.dest], b.box);
+          b.box = null;
+          b.state = 'idle';
+          b.path = null;
+        }
+      }
+    }
+  }
+
+  function stepStations(s, dt) {
+    for (const st of s.stations) {
+      for (const job of [...st.busy]) {
+        job.left -= dt;
+        if (job.left <= 0) {
+          st.busy.splice(st.busy.indexOf(job), 1);
+          finishWork(s, st, job.box);
+        }
+      }
+      if (!st.work || asleep(st, s.t)) continue;
+      while (st.busy.length < st.crew && st.in.length) {
+        const box = st.in.shift();
+        const dur = st.t === 'shop' && box.fixing ? s.fixWork : st.work;
+        box.dur = dur;
+        st.busy.push({ box, left: dur, total: dur });
+      }
+    }
+  }
+
+  const pileSize = st => st.in.length + st.out.filter(b => !b.claimed).length + st.out.filter(b => b.claimed).length;
+
+  function step(s, dt) {
+    if (s.phase !== 'run') return;
+    s.t += dt;
+    if (s.t >= s.nextBox && s.t < s.L.time) {
+      s.nextBox += s.L.every;
+      const box = { id: s.boxId++, born: s.t, bad: false, loops: 0, work: 0, carried: 0, next: 1, state: 'live', fixing: false, marked: false, claimed: false, dur: 0 };
+      s.boxes.push(box);
+      s.stations[0].out.push(box);
+    }
+    stepStations(s, dt);
+    stepBots(s, dt);
+    const jammed = s.stations.find(st => st.t !== 'truck' && pileSize(st) > s.L.jam);
+    if (jammed) finish(s, jammed);
+    else if (s.t >= s.L.time) finish(s, null);
+  }
+
+  function finish(s, jammed) {
+    s.phase = 'end';
+    const avg = f => (s.done.length ? s.done.reduce((a, b) => a + f(b), 0) / s.done.length : 0);
+    const days = avg(b => b.doneAt - b.born);
+    const handsOn = avg(b => b.work);
+    const riding = avg(b => b.carried);
+    const L = s.L;
+    let stars = 0;
+    if (!jammed && s.shipped >= L.quota) {
+      stars = 1;
+      if (days <= L.stars[0]) stars = 2;
+      if (days <= L.stars[1] && s.escaped === 0) stars = 3;
+    }
+    s.result = {
+      jammed: jammed ? jammed.name : null, stars, days, handsOn, riding,
+      waiting: Math.max(0, days - handsOn - riding),
+      loops: s.done.reduce((a, b) => a + b.loops, 0),
+      worstLoops: s.done.reduce((a, b) => Math.max(a, b.loops), 0),
+      stuck: s.boxes.length - s.shipped,
+      shipped: s.shipped, escaped: s.escaped, turbo: !!s.bought.turbo,
+    };
+  }
+
+  return { W, H, LEVELS, SHOP, TYPES, newLevel, setPipe, pipesOf, path, legs, ready, start, buy, price, step, asleep, pileSize };
+})();
+globalThis.Sim = Sim;
+</script>
+
+<script id="game">
+// Drawing and input. All rules live in Sim.
+(() => {
+  const TILE = 16;
+  const cv = document.getElementById('floor');
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const el = id => document.getElementById(id);
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const C = {
+    floorA: '#33435a', floorB: '#2e3d52', seam: '#283548', rock: '#5b4a3f', rockHi: '#7b6752', rockLo: '#3f332c',
+    pipe: '#8d99ae', pipeHi: '#c5cedb', pipeLo: '#55607a', rivet: '#3e4760', ghost: '#f2c14e',
+    wall: '#d9cdb4', wallLo: '#a9997c', base: '#6b5d4a', ink: '#1a1429', white: '#fff8ec',
+    box: '#d59a54', boxHi: '#eebf80', boxLo: '#8f5e2c', tape: '#f4e2b8', red: '#e8603c', green: '#4cc9b8', mustard: '#f2c14e',
+    roof: { dock: '#4c7fc9', shop: '#e8603c', insp: '#9a6bd1', lab: '#35a597', truck: '#d9a62e' },
+  };
+
+  const BOT = [
+    '....r....',
+    '....w....',
+    '.wwwwwww.',
+    '.wkwwwkw.',
+    '.wwwwwww.',
+    '..ttttt..',
+    '.ttttttt.',
+    '.ttttttt.',
+  ];
+  const BOT_PAL = { r: '#e8603c', w: '#e9edf2', k: '#1a1429', t: '#4cc9b8' };
+  const ICONS = {
+    dock: ['...#....', '...##...', '#######.', '########', '#######.', '...##...', '...#....', '........'],
+    shop: ['.####...', '.#####..', '.####...', '...##...', '...##...', '...##...', '...##...', '...##...'],
+    insp: ['.###....', '#...#...', '#...#...', '#...#...', '.###....', '....#...', '.....#..', '......#.'],
+    lab: ['..###...', '...#....', '...#....', '..#.#...', '.#...#..', '.#####..', '#######.', '.#####..'],
+    truck: ['........', '#####...', '#####.#.', '#####.##', '########', '########', '.##..##.', '........'],
+  };
+  const GLYPHS = {
+    A: [2,5,7,5,5], B: [6,5,6,5,6], C: [3,4,4,4,3], D: [6,5,5,5,6], E: [7,4,6,4,7], F: [7,4,6,4,4], G: [3,4,5,5,3],
+    H: [5,5,7,5,5], I: [7,2,2,2,7], J: [1,1,1,5,2], K: [5,5,6,5,5], L: [4,4,4,4,7], M: [5,7,7,5,5], N: [6,5,5,5,5],
+    O: [2,5,5,5,2], P: [6,5,6,4,4], Q: [2,5,5,6,3], R: [6,5,6,5,5], S: [3,4,2,1,6], T: [7,2,2,2,2], U: [5,5,5,5,7],
+    V: [5,5,5,5,2], W: [5,5,7,7,5], X: [5,5,2,5,5], Y: [5,5,2,2,2], Z: [7,1,2,4,7],
+    0: [7,5,5,5,7], 1: [2,6,2,2,7], 2: [6,1,2,4,7], 3: [6,1,2,1,6], 4: [5,5,7,1,1], 5: [7,4,6,1,6], 6: [3,4,7,5,7], 7: [7,1,2,2,2], 8: [7,5,7,5,7], 9: [7,5,7,1,6],
+    '!': [2,2,2,0,2], '+': [0,2,7,2,0], '-': [0,0,7,0,0], '?': [6,1,2,0,2], '/': [1,1,2,4,4], ' ': [0,0,0,0,0],
+  };
+
+  const rect = (c, x, y, w, h) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); };
+  function sprite(rows, pal, x, y) {
+    rows.forEach((row, j) => [...row].forEach((ch, i) => { if (pal[ch]) rect(pal[ch], x + i, y + j, 1, 1); }));
+  }
+  function text(str, x, y, colour) {
+    let cx = Math.round(x);
+    for (const ch of str) {
+      const rows = GLYPHS[ch] || GLYPHS['?'];
+      rows.forEach((bits, j) => {
+        for (let b = 0; b < 3; b++) if (bits & (4 >> b)) rect(colour, cx + b, y + j, 1, 1);
+      });
+      cx += 4;
+    }
+  }
+  const textWidth = s => s.length * 4 - 1;
+  function label(str, cx, y, colour = C.white) {
+    const x = Math.round(cx - textWidth(str) / 2);
+    rect(C.ink, x - 1, y - 1, textWidth(str) + 2, 7);
+    text(str, x, y, colour);
+  }
+
+  // ----- sound
+  let audio = null, soundOn = true;
+  function blip(freq, ms, type = 'square', vol = 0.04) {
+    if (!soundOn) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), v = audio.createGain();
+      o.type = type; o.frequency.value = freq;
+      v.gain.setValueAtTime(vol, audio.currentTime);
+      v.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + ms / 1000);
+      o.connect(v).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + ms / 1000);
+    } catch { soundOn = false; }
+  }
+
+  // ----- state
+  let best = [0, 0, 0, 0];
+  try { best = JSON.parse(localStorage.getItem('boxbot-stars')) || best; } catch { /* stars just won't persist */ }
+  let s = Sim.newLevel(0);
+  let floaters = [], paused = false, fast = false, tick = 0;
+  let cursor = null, paintMode = null, lastCell = null;
+  let lastShown = '';
+
+  function load(i, keep) {
+    s = Sim.newLevel(i, Date.now(), keep ? Sim.pipesOf(s) : null);
+    floaters = []; paused = false; lastShown = '';
+    render();
+  }
+
+  // ----- drawing
+  function drawFloor() {
+    for (let y = 0; y < Sim.H; y++) for (let x = 0; x < Sim.W; x++) {
+      rect((x + y) % 2 ? C.floorA : C.floorB, x * TILE, y * TILE, TILE, TILE);
+      if (s.grid[y][x] === 1) {
+        const px = x * TILE, py = y * TILE;
+        rect(C.rockLo, px + 1, py + 3, 14, 12);
+        rect(C.rock, px + 1, py + 1, 14, 11);
+        rect(C.rockHi, px + 2, py + 2, 12, 2);
+        rect(C.rockLo, px + 7, py + 1, 1, 11);
+      }
+    }
+  }
+
+  function drawPipes() {
+    const conn = (x, y) => x >= 0 && y >= 0 && x < Sim.W && y < Sim.H && (s.grid[y][x] === 2 || s.owner[y][x] !== -1);
+    for (let y = 0; y < Sim.H; y++) for (let x = 0; x < Sim.W; x++) {
+      if (s.grid[y][x] !== 2) continue;
+      const px = x * TILE, py = y * TILE;
+      const arm = (ax, ay, w, h) => {
+        rect(C.pipeLo, ax, ay, w, h);
+        if (w > h) { rect(C.pipe, ax, ay + 1, w, h - 2); rect(C.pipeHi, ax, ay + 1, w, 1); }
+        else { rect(C.pipe, ax + 1, ay, w - 2, h); rect(C.pipeHi, ax + 1, ay, 1, h); }
+      };
+      if (conn(x - 1, y)) arm(px, py + 5, 8, 6);
+      if (conn(x + 1, y)) arm(px + 8, py + 5, 8, 6);
+      if (conn(x, y - 1)) arm(px + 5, py, 6, 8);
+      if (conn(x, y + 1)) arm(px + 5, py + 8, 6, 8);
+      rect(C.pipeLo, px + 4, py + 4, 8, 8);
+      rect(C.pipe, px + 5, py + 5, 6, 6);
+      rect(C.pipeHi, px + 5, py + 5, 6, 1);
+      rect(C.rivet, px + 7, py + 7, 2, 2);
+    }
+  }
+
+  function drawBox(x, y, marked) {
+    rect(C.boxLo, x, y + 1, 7, 6);
+    rect(marked ? C.red : C.box, x, y, 7, 6);
+    rect(marked ? '#f59a80' : C.boxHi, x, y, 7, 1);
+    rect(marked ? C.white : C.tape, x + 3, y, 1, 6);
+  }
+
+  function drawStation(st) {
+    const x = st.x * TILE, y = st.y * TILE, roof = C.roof[st.t];
+    const sleeping = Sim.asleep(st, s.t) && s.phase === 'run';
+    rect('rgba(15,10,30,0.35)', x + 2, y + 28, 30, 4);
+    rect(C.wallLo, x + 1, y + 6, 30, 24);
+    rect(sleeping ? '#a89f92' : C.wall, x + 2, y + 6, 28, 22);
+    rect(C.base, x + 1, y + 28, 30, 2);
+    rect(roof, x, y + 2, 32, 7);
+    rect(C.white, x, y + 2, 32, 1);
+    const icon = ICONS[st.t];
+    rows(icon, x + 12, y + 13, sleeping ? C.wallLo : roof);
+    if (st.busy.length) {
+      const job = st.busy[0];
+      const w = Math.round(24 * (1 - job.left / job.total));
+      rect(C.ink, x + 4, y + 24, 24, 3);
+      rect(C.mustard, x + 4, y + 24, w, 3);
+    }
+    if (sleeping) {
+      const bob = calm ? 0 : Math.floor(tick / 18) % 4;
+      text('Z', x + 22, y + 10 - bob, C.ink);
+      text('Z', x + 26, y + 5 - bob, C.ink);
+    }
+  }
+  function rows(icon, x, y, colour) {
+    icon.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === '#') rect(colour, x + i, y + j, 1, 1); }));
+  }
+
+  function drawPile(st) {
+    const boxes = [...st.in, ...st.out];
+    const x0 = st.x * TILE + 1, y0 = st.y * TILE + 25;
+    boxes.slice(0, 15).forEach((b, i) => {
+      const col = i % 5, row = Math.floor(i / 5);
+      drawBox(x0 + col * 6, y0 - row * 6, b.marked);
+    });
+    const n = Sim.pileSize(st);
+    if (n >= 4 && st.t !== 'truck') {
+      const near = n >= s.L.jam - 2;
+      label(`${n}/${s.L.jam}`, st.x * TILE + 16, st.y * TILE - 6 < 0 ? st.y * TILE + 33 : st.y * TILE - 6, near ? C.red : C.mustard);
+    }
+  }
+
+  function drawBot(b) {
+    const walking = b.state !== 'idle';
+    const frame = !calm && walking && Math.floor(tick / 6) % 2;
+    const spread = s.bots.length > 1 && b.state === 'idle' ? (b.id % 4) * 4 - 6 : 0;
+    const x = Math.round(b.x * TILE - 4.5) + spread, y = Math.round(b.y * TILE - 9) - (frame ? 1 : 0);
+    sprite(BOT, BOT_PAL, x, y);
+    rect(C.ink, x + 1, y + 8, 2, frame ? 2 : 1);
+    rect(C.ink, x + 6, y + 8, 2, frame ? 1 : 2);
+    if (b.state === 'carry' && b.box) drawBox(x + 1, y - 5, b.box.marked);
+  }
+
+  function drawHints() {
+    if (s.phase !== 'build') return;
+    const legs = Sim.legs(s);
+    legs.forEach((ok, i) => {
+      if (ok) return;
+      const a = s.stations[i], b = s.stations[i + 1];
+      const ax = (a.x + 1) * TILE, ay = (a.y + 1) * TILE, bx = (b.x + 1) * TILE, by = (b.y + 1) * TILE;
+      const len = Math.hypot(bx - ax, by - ay), n = Math.floor(len / 8);
+      for (let k = 1; k < n; k++) {
+        if ((k + Math.floor(tick / (calm ? 1e9 : 12))) % 2) continue;
+        rect(C.ghost, ax + (bx - ax) * k / n, ay + (by - ay) * k / n, 2, 2);
+      }
+    });
+  }
+
+  function draw() {
+    tick++;
+    drawFloor();
+    drawPipes();
+    drawHints();
+    s.stations.forEach(drawStation);
+    s.stations.forEach(st => label(st.name, (st.x + 1) * TILE, st.y === 0 ? 3 : st.y * TILE - 5));
+    s.stations.forEach(drawPile);
+    [...s.bots].sort((a, b) => a.y - b.y).forEach(drawBot);
+    if (cursor) {
+      const ok = cursor.x >= 0;
+      if (ok) {
+        g.strokeStyle = C.mustard; g.lineWidth = 1;
+        g.strokeRect(cursor.x * TILE + 0.5, cursor.y * TILE + 0.5, TILE - 1, TILE - 1);
+      }
+    }
+    floaters.forEach(f => label(f.text, f.x * TILE, f.y * TILE - 16 - f.age * 12, f.colour));
+    if (paused && s.phase === 'run') {
+      rect('rgba(26,20,41,0.55)', 0, 0, 256, 160);
+      label('PAUSED', 128, 76, C.mustard);
+    }
+    if (s.result && s.result.jammed) {
+      rect('rgba(26,20,41,0.55)', 0, 0, 256, 160);
+      label(`JAMMED AT ${s.result.jammed}!`, 128, 76, C.red);
+    }
+  }
+
+  // ----- HUD and panels
+  function stars(n) { return '★'.repeat(n) + '☆'.repeat(3 - n); }
+
+  function messageHtml() {
+    const L = s.L;
+    if (s.phase === 'build') {
+      const missing = Sim.legs(s).map((ok, i) => (ok ? null : `${s.stations[i].name} to ${s.stations[i + 1].name}`)).filter(Boolean);
+      return `<strong>${s.i + 1}. ${L.name}</strong>${L.intro} Goal: ship ${L.quota} boxes in ${L.time} days.${missing.length ? ` Still to connect: ${missing[0]}.` : ' All connected, so hit the button.'}`;
+    }
+    if (s.phase === 'run') {
+      const pile = Math.max(...s.stations.filter(st => st.t !== 'truck').map(Sim.pileSize));
+      return `<strong>${s.i + 1}. ${L.name}</strong>${pile >= L.jam - 2 ? `A pile is about to jam at ${L.jam + 1} boxes. Buy something for that station.` : 'Watch where the boxes pile up, then spend coins there. You can still add pipe.'}`;
+    }
+    const r = s.result, total = Math.max(0.01, r.handsOn + r.riding + r.waiting);
+    const share = v => `${(v / total) * 100}%`;
+    const parts = r.shipped ? `<div class="bar" role="img" aria-label="How an average box spent its time"><i style="width:${share(r.handsOn)};background:var(--teal)"></i><i style="width:${share(r.riding)};background:var(--mustard)"></i><i style="width:${share(r.waiting)};background:var(--tomato)"></i></div>
+      <div class="key"><span><i style="background:var(--teal)"></i>Worked on ${r.handsOn.toFixed(1)}</span><span><i style="background:var(--mustard)"></i>Riding a bot ${r.riding.toFixed(1)}</span><span><i style="background:var(--tomato)"></i>Waiting in piles ${r.waiting.toFixed(1)}</span></div>` : '';
+    const headline = r.jammed ? `Jammed at the ${r.jammed.toLowerCase()}` : r.stars ? 'Shift complete' : `Short of the goal: ${r.shipped} of ${L.quota} shipped`;
+    const lines = [];
+    if (r.shipped) lines.push(`Your average box took ${r.days.toFixed(1)} days and was worked on for ${r.handsOn.toFixed(1)}.`);
+    if (r.loops) lines.push(`Boxes went back round ${r.loops} time${r.loops === 1 ? '' : 's'}, and the unluckiest went ${r.worstLoops} time${r.worstLoops === 1 ? '' : 's'}.`);
+    if (r.escaped) lines.push(`${r.escaped} bad box${r.escaped === 1 ? '' : 'es'} reached a customer.`);
+    if (r.turbo) lines.push('The turbo hammer took about a day off each box. Compare that with the red bar.');
+    if (r.stuck && !r.jammed) lines.push(`${r.stuck} box${r.stuck === 1 ? ' was' : 'es were'} still stuck when the shift ended.`);
+    const need = L.stars;
+    return `<strong>${headline}</strong> <span class="stars">${stars(r.stars)}</span>${parts}<p style="margin:6px 0 0">${lines.join(' ')}</p><p style="margin:4px 0 0;color:var(--dim)">Two stars: average under ${need[0]} days. Three: under ${need[1]} with no fines.</p>`;
+  }
+
+  function render() {
+    el('coins').textContent = s.coins;
+    el('clock').textContent = `${Math.max(0, Math.ceil(s.L.time - s.t))} D`;
+    el('shipped').textContent = `${s.shipped}/${s.L.quota}`;
+    const pile = Math.max(...s.stations.filter(st => st.t !== 'truck').map(Sim.pileSize));
+    el('pile').textContent = `${pile}/${s.L.jam}`;
+    const html = messageHtml();
+    if (html !== lastShown) { el('msg').innerHTML = html; lastShown = html; }
+
+    const unlocked = i => i === 0 || best[i - 1] > 0;
+    const levels = Sim.LEVELS.map((L, i) => `<button data-level="${i}" class="${i === s.i ? 'on' : ''}" ${unlocked(i) ? '' : 'disabled'} title="${L.name}">${i + 1}${best[i] ? ' ' + '★'.repeat(best[i]) : ''}</button>`).join('');
+    if (el('levels').dataset.v !== levels) { el('levels').innerHTML = levels; el('levels').dataset.v = levels; }
+
+    let controls = '';
+    if (s.phase === 'build') controls = `<button class="go" id="start" ${Sim.ready(s) ? '' : 'disabled'}>Start the shift</button><button id="clear">Clear pipes</button>`;
+    if (s.phase === 'run') controls = `<button id="pause" class="${paused ? 'on' : ''}">${paused ? 'Resume' : 'Pause'}</button><button id="fast" class="${fast ? 'on' : ''}">Double speed</button>`;
+    if (s.phase === 'end') {
+      const next = s.result.stars > 0 && s.i < Sim.LEVELS.length - 1;
+      controls = `${next ? '<button class="go" id="next">Next shift</button>' : ''}<button id="retry" ${next ? '' : 'class="go"'}>Try again, same pipes</button>`;
+    }
+    controls += `<button id="sound" class="${soundOn ? 'on' : ''}">Sound</button>`;
+    if (el('controls').dataset.v !== controls) { el('controls').innerHTML = controls; el('controls').dataset.v = controls; }
+
+    const shop = s.phase === 'end' ? '' : s.L.shop.map(id => {
+      const it = Sim.SHOP[id], p = Sim.price(s, id), owned = it.once && s.bought[id];
+      return `<button data-buy="${id}" ${owned || s.coins < p ? 'disabled' : ''}>${it.name}<b>${owned ? 'OWNED' : p + 'C'}</b><span>${it.desc}</span></button>`;
+    }).join('');
+    if (el('shop').dataset.v !== shop) { el('shop').innerHTML = shop; el('shop').dataset.v = shop; }
+    el('shopTitle').hidden = s.phase === 'end';
+  }
+
+  function consumeEvents() {
+    for (const e of s.events) {
+      const colour = e.k === 'ship' ? C.mustard : C.red;
+      floaters.push({ text: e.text, x: e.x, y: e.y, age: 0, colour });
+      if (e.k === 'ship') { blip(660, 70); blip(990, 110); }
+      else if (e.k === 'oops') blip(110, 260, 'sawtooth');
+      else blip(180, 120);
+    }
+    s.events.length = 0;
+  }
+
+  // ----- loop
+  let last = performance.now(), wasEnd = false;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (s.phase === 'run' && !paused) {
+      const steps = fast ? 2 : 1;
+      for (let k = 0; k < steps; k++) Sim.step(s, dt);
+    }
+    floaters.forEach(f => { f.age += dt; });
+    floaters = floaters.filter(f => f.age < 1.1);
+    consumeEvents();
+    if (s.phase === 'end' && !wasEnd) {
+      const r = s.result;
+      if (r.stars > best[s.i]) {
+        best[s.i] = r.stars;
+        try { localStorage.setItem('boxbot-stars', JSON.stringify(best)); } catch { /* fine */ }
+      }
+      if (r.stars) { blip(523, 120); setTimeout(() => blip(784, 200), 120); } else blip(120, 400, 'sawtooth');
+    }
+    wasEnd = s.phase === 'end';
+    draw();
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  // ----- input
+  function cellAt(e) {
+    const r = cv.getBoundingClientRect();
+    const border = 4;
+    const scale = (r.width - border * 2) / 256;
+    return {
+      x: Math.floor((e.clientX - r.left - border) / scale / TILE),
+      y: Math.floor((e.clientY - r.top - border) / scale / TILE),
+    };
+  }
+  function refused(reason) {
+    if (reason === 'coins') { floaters.push({ text: 'NO COINS', x: 8, y: 6, age: 0, colour: C.red }); blip(140, 90); }
+  }
+  function paint(c) {
+    if (paintMode === null) return;
+    const r = Sim.setPipe(s, c.x, c.y, paintMode);
+    if (r === null) blip(paintMode ? 420 : 260, 25, 'square', 0.02);
+    else refused(r);
+  }
+  function paintTo(c) {
+    let { x, y } = lastCell || c;
+    while (x !== c.x || y !== c.y) {
+      if (x !== c.x) x += Math.sign(c.x - x); else y += Math.sign(c.y - y);
+      paint({ x, y });
+    }
+    lastCell = c;
+  }
+  cv.addEventListener('pointerdown', e => {
+    cv.setPointerCapture(e.pointerId);
+    const c = cellAt(e);
+    const hasPipe = c.x >= 0 && c.y >= 0 && c.x < Sim.W && c.y < Sim.H && s.grid[c.y][c.x] === 2;
+    paintMode = !hasPipe;
+    lastCell = c;
+    cursor = c;
+    paint(c);
+  });
+  cv.addEventListener('pointermove', e => {
+    const c = cellAt(e);
+    cursor = c;
+    if (paintMode !== null && e.buttons) paintTo(c);
+  });
+  const stopPaint = () => { paintMode = null; lastCell = null; };
+  cv.addEventListener('pointerup', stopPaint);
+  cv.addEventListener('pointercancel', stopPaint);
+  cv.addEventListener('pointerleave', () => { if (paintMode === null) cursor = null; });
+  cv.addEventListener('keydown', e => {
+    const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    cursor = cursor || { x: 2, y: 2 };
+    if (moves[e.key]) {
+      e.preventDefault();
+      cursor = {
+        x: Math.max(0, Math.min(Sim.W - 1, cursor.x + moves[e.key][0])),
+        y: Math.max(0, Math.min(Sim.H - 1, cursor.y + moves[e.key][1])),
+      };
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      refused(Sim.setPipe(s, cursor.x, cursor.y, s.grid[cursor.y][cursor.x] !== 2));
+    }
+  });
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.buy) { if (Sim.buy(s, b.dataset.buy)) blip(880, 80); }
+    else if (b.dataset.level) load(+b.dataset.level, false);
+    else if (b.id === 'start') { Sim.start(s); blip(440, 80); blip(660, 120); }
+    else if (b.id === 'clear') Sim.pipesOf(s).forEach(([x, y]) => Sim.setPipe(s, x, y, false));
+    else if (b.id === 'pause') paused = !paused;
+    else if (b.id === 'fast') fast = !fast;
+    else if (b.id === 'sound') { soundOn = !soundOn; if (soundOn) blip(660, 60); }
+    else if (b.id === 'next') load(s.i + 1, false);
+    else if (b.id === 'retry') load(s.i, true);
+  });
+
+  render();
+  requestAnimationFrame(frame);
+})();
+</script>
