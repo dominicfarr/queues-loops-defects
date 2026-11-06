@@ -1,0 +1,1072 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket to Prod</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jersey+20&family=VT323&display=swap">
+<style>
+  /* Layout: a single pipeline scene on top, the control desk under it, and the shop between quarters. */
+  :root {
+    color-scheme: dark;
+    --bg: #161c38; --panel: #222b52; --panel-2: #303b6b; --line: #47558f;
+    --ink: #eef2ff; --dim: #aab4dc;
+    --go: #a7e05a; --stop: #ff7a6b; --wait: #ffc857; --sky: #62c6ff;
+    --display: "Jersey 20", ui-monospace, Menlo, monospace;
+    --body: "VT323", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink); font: 400 19px/1.2 var(--body);
+    margin: 0; padding-block: 14px 32px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .cab { max-width: 960px; margin: 0 auto; display: grid; gap: 8px; min-width: 0; }
+  h1 { font: 400 38px/1 var(--display); margin: 0; color: var(--go); letter-spacing: 0.02em; }
+  h2 { font: 400 22px/1.1 var(--display); margin: 6px 0 2px; color: var(--sky); }
+  .hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  .hud div { background: var(--panel); padding: 4px 8px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .hud small { display: block; font-size: 15px; color: var(--dim); }
+  .hud b { font: 400 25px/1 var(--display); color: var(--wait); font-variant-numeric: tabular-nums; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 4px solid var(--line); background: #27305a; touch-action: manipulation; }
+  .msg { background: var(--panel); padding: 8px 12px; min-height: 60px; }
+  .msg strong { display: block; font: 400 23px/1.1 var(--display); color: var(--go); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .row > span { color: var(--dim); }
+  button {
+    font: 400 18px/1.15 var(--body); color: var(--ink); background: var(--panel-2);
+    border: 0; border-bottom: 3px solid #0e1329; padding: 6px 10px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--line); }
+  button:active:not(:disabled) { border-bottom-width: 1px; margin-top: 2px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible { outline: 3px solid var(--wait); outline-offset: 1px; }
+  button.go { background: var(--go); color: #16230a; font-size: 21px; }
+  button.on { background: var(--wait); color: #2c2004; }
+  .shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 6px; }
+  .card { text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; align-content: start; height: 100%; }
+  .card b { font: 400 20px/1.1 var(--display); }
+  .card i { font-style: normal; color: var(--wait); }
+  .card span { grid-column: 1 / -1; color: var(--dim); font-size: 17px; }
+  .card em { grid-column: 1 / -1; font-style: normal; color: var(--sky); font-size: 16px; }
+  .card.have { background: #27442f; opacity: 1; }
+  .card.have i { color: var(--go); }
+  .bar { display: flex; height: 18px; margin: 6px 0 3px; background: #0e1329; }
+  .bar i { display: block; height: 100%; }
+  .key { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+  .key i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
+  .stars { font: 400 28px var(--display); color: var(--wait); }
+  .stage { position: relative; min-width: 0; }
+  .quote { position: absolute; left: 8px; right: 8px; bottom: 8px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; align-items: center; background: #0e1329; border: 3px solid var(--wait); padding: 6px 10px; pointer-events: none; }
+  .quote[hidden] { display: none; }
+  .quote p { margin: 0; font-size: 20px; line-height: 1.1; }
+  .quote small { display: block; color: var(--sky); font-size: 16px; margin-top: 2px; }
+  .face { display: block; width: 48px; height: 56px; image-rendering: pixelated; }
+  .card.legend { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .card.legend .face { grid-row: span 2; }
+  .card.legend span, .card.legend em { grid-column: 2 / -1; }
+  .card.legend q { grid-column: 1 / -1; color: var(--ink); font-size: 17px; }
+  @media (max-width: 560px) { .quote p { font-size: 17px; } .quote small { font-size: 14px; } .face { width: 36px; height: 42px; } }
+  footer { color: var(--dim); font-size: 17px; }
+  a { color: var(--sky); }
+</style>
+
+<div class="cab">
+  <h1>Ticket to Prod</h1>
+  <div class="hud">
+    <div><small>COINS</small><b id="coins">0</b></div>
+    <div><small id="qname">QUARTER</small><b id="clock">0</b></div>
+    <div><small>SHIPPED</small><b id="shipped">0</b></div>
+    <div><small>AVG DAYS</small><b id="avg">0</b></div>
+  </div>
+  <div class="stage">
+    <canvas id="floor" width="320" height="180" aria-label="A delivery pipeline. Tickets move from the robots' desks through each stop to the user. Tap a closed stop to chase it."></canvas>
+    <div class="quote" id="quote" aria-live="polite" hidden></div>
+  </div>
+  <div class="msg" id="msg" aria-live="polite"></div>
+  <div class="row" id="controls"></div>
+  <div class="row" id="policy"></div>
+  <div class="row" id="powers"></div>
+  <div id="shopArea"></div>
+  <footer>Inspired by <a href="https://www.industriallogic.com/blog/faster-and-more-predictable/">Faster and More Predictable</a>. One second is one working day. The numbers are tuned for fun, so they prove nothing about your team. Nobody here is slow: the waits come from how the work is set up. An unofficial, affectionate fan tribute: the caricatures are drawn from memory, the quotes are theirs, and the powers are the game's invention. None of the legends has endorsed or been involved in it.</footer>
+</div>
+
+<script id="sim">
+// Pure game rules. No drawing in here.
+const Sim = (() => {
+  const ORDER = ['desk', 'review', 'merge', 'test', 'security', 'release', 'prod'];
+  const GATE = {
+    review:   { name: 'REVIEW',   work: 0.6, cycle: 5,  open: 3, closed: 'MEETING', chase: true },
+    merge:    { name: 'MERGE',    work: 0.4 },
+    test:     { name: 'TEST',     work: 1,   cycle: 5,  open: 2, closed: 'BOOKED', chase: true },
+    security: { name: 'SECURITY', work: 1,   cycle: 10, open: 3, closed: 'AWAY', chase: true },
+    release:  { name: 'RELEASE',  work: 0,   cycle: 10, open: 1, closed: 'NEXT TRAIN' },
+  };
+  const LEN = 60;
+  const QUARTERS = [
+    { name: 'Q1', gates: ['review'], rate: 0.45, quota: 18, stars: [9, 12],
+      title: 'First release', intro: 'Tickets land in the inbox and a robot picks one up. When it finishes, the ticket waits for review and the robot starts another. Watch what happens when one bounces back.' },
+    { name: 'Q2', gates: ['review', 'test'], rate: 0.6, quota: 22, stars: [12, 22],
+      title: 'Testing joins', intro: 'Testing is booked most of the week. A ticket that fails there rides all the way back, then goes through review and testing again.' },
+    { name: 'Q3', gates: ['review', 'merge', 'test', 'release'], rate: 0.7, quota: 24, stars: [14, 30],
+      title: 'The release train', intro: 'Merge hits conflicts more often the older a ticket gets, and the release train only leaves every 10 days.' },
+    { name: 'Q4', gates: ['review', 'merge', 'test', 'security', 'release'], rate: 0.85, quota: 28, stars: [16, 38],
+      title: 'Big launch', intro: 'Security visits three days in every ten and more tickets are coming. Find the longest wait and remove it.' },
+  ];
+  const SHOP = {
+    junior:  { group: 'Team', name: 'Hire a junior', cost: 12, step: 6, max: 6, text: 'Cheap, slower and buggier, with more debt. Levels up after 10 tickets. Slows the team for 12 days while learning the ropes.' },
+    senior:  { group: 'Team', name: 'Hire a senior', cost: 40, step: 20, max: 6, text: 'Quicker, far fewer bugs, half the debt. Still slows the team for 12 days while learning the ropes.' },
+    reviewer:{ group: 'Team', name: 'Second reviewer', cost: 25, step: 15, max: 2, text: 'Review handles two tickets at once when it is open.' },
+    pair:    { group: 'Ways of working', name: 'Pair programming', cost: 45, text: 'Review closes for good: the pair already reviewed it. Robots type slower, with fewer bugs.' },
+    small:   { group: 'Ways of working', name: 'Small batches', cost: 60, text: 'Tickets shrink. Work, review and fixes all get quicker, and conflicts halve.' },
+    kanban:  { group: 'Ways of working', name: 'Kanban board', cost: 50, text: 'Tickets arrive steadily, not in a sprint-sized lump, and you get a WIP limit. Robots at the limit go and help the longest line.' },
+    trunk:   { group: 'Ways of working', name: 'Trunk-based', cost: 35, text: 'No long branches. The merge stop disappears.' },
+    format:  { group: 'Craft', name: 'Tabs vs spaces', cost: 5, text: 'Pick one and end the argument. Most style bounces stop.' },
+    lint:    { group: 'Craft', name: 'Static analysis', cost: 20, text: 'Catches the small stuff at the desk, so fewer bugs and style bounces reach review.' },
+    tdd:     { group: 'Craft', name: 'TDD', cost: 35, text: 'Tickets take a little longer to write. Half as many bugs.' },
+    specs:   { group: 'Craft', name: 'Specs people agree on', cost: 25, text: 'Build the right thing first time. Fewer bugs reach anyone.' },
+    solid:   { group: 'Craft', name: 'SOLID', cost: 15, text: 'Code that is easier to change. Fixes after a bounce go faster.' },
+    ci:      { group: 'Pipeline', name: 'Automated tests', cost: 60, text: 'Testing never closes, runs fast and catches more.' },
+    left:    { group: 'Pipeline', name: 'Shift left security', cost: 40, text: 'Security checks run in the pipeline, always open and quick.' },
+    cd:      { group: 'Pipeline', name: 'Continuous delivery', cost: 45, text: 'The release train stop disappears. Passed tickets go straight to the user.' },
+  };
+  // Real people, drawn as caricatures. `quote` and `source` are theirs; the powers are the game's.
+  // `look` feeds the portrait: hair style, hair colour, skin, coat, glasses, beard.
+  const LEGENDS = {
+    fowler:  { name: 'Martin Fowler', cost: 50, power: 'Refactor', text: 'Robots work twice as fast for 10 days.', shout: 'REFACTOR!',
+      quote: "I enjoy the irony of my title, as I'm not chief of anybody and don't do any science.", source: 'martinfowler.com, on being Chief Scientist',
+      look: { hair: 'bald', col: '#c9c9c9', skin: '#f0c8a0', coat: '#3f6fb5', beard: '#c9c9c9', glasses: true } },
+    bob:     { name: 'Robert C. Martin', cost: 50, power: 'Tidy up', text: 'No style bounces for 15 days.', shout: 'TIDY UP!',
+      quote: 'Truth can only be found in one place: the code.', source: 'Clean Code',
+      look: { hair: 'short', col: '#e4e4e4', skin: '#f0c8a0', coat: '#7a3b3b', beard: '#e4e4e4', glasses: true } },
+    beck:    { name: 'Kent Beck', cost: 55, power: 'Great habits', text: 'No new debt and half the bugs for 15 days.', shout: 'GREAT HABITS!',
+      quote: "I'm not a great programmer; I'm just a good programmer with great habits.", source: 'in Refactoring, Fowler et al.',
+      look: { hair: 'short', col: '#9a9a9a', skin: '#f0c8a0', coat: '#4c8a5a', beard: '#9a9a9a', glasses: true } },
+    hickey:  { name: 'Rich Hickey', cost: 60, power: 'Untangle', text: 'All waiting rework is finished right now.', shout: 'UNTANGLED!',
+      quote: 'Who drives their car around banging against the guardrail?', source: 'Simple Made Easy, on relying on tests',
+      look: { hair: 'curly', col: '#6b5a4a', skin: '#f0c8a0', coat: '#2c2c3c' } },
+    cockburn:{ name: 'Alistair Cockburn', cost: 50, power: 'Cooperate', text: 'For 10 days, any idle robot helps the longest line.', shout: 'COOPERATE!',
+      quote: "Your best idea will be misquoted and misused, or ignored, and you don't get to choose which.", source: 'alistaircockburn.com',
+      look: { hair: 'short', col: '#b5b5b5', skin: '#f0c8a0', coat: '#8a6a2c', glasses: true } },
+    brooks:  { name: 'Fred Brooks', cost: 45, power: 'Conceptual integrity', text: 'New hires finish learning the ropes right now.', shout: 'NO SILVER BULLET!',
+      quote: 'Adding manpower to a late software project makes it later.', source: 'The Mythical Man-Month',
+      look: { hair: 'short', col: '#efefef', skin: '#f3d3b3', coat: '#30384f', glasses: true } },
+    ward:    { name: 'Ward Cunningham', cost: 60, power: 'Pay it back', text: 'All tech debt is paid off right now.', shout: 'DEBT PAID!',
+      quote: 'Shipping first time code is like going into debt.', source: 'WyCash report, OOPSLA 1992',
+      look: { hair: 'short', col: '#a8a8a8', skin: '#f0c8a0', coat: '#3b6f73', beard: '#a8a8a8', glasses: true } },
+    adzic:   { name: 'Gojko Adzic', cost: 50, power: 'Show examples', text: 'New work starts bug free for 15 days.', shout: 'EXAMPLES!',
+      quote: 'Specification by Example: How Successful Teams Deliver the Right Software', source: 'the title of the book',
+      look: { hair: 'short', col: '#3b2f2a', skin: '#f0c8a0', coat: '#a0522d', beard: '#3b2f2a' } },
+    north:   { name: 'Dan North', cost: 50, power: 'Given when then', text: 'Every stop works three times as fast for 10 days.', shout: 'GIVEN WHEN THEN!',
+      quote: '"Behaviour" is a more useful word than "test".', source: 'Introducing BDD',
+      look: { hair: 'short', col: '#5a4a3a', skin: '#f0c8a0', coat: '#5a3f8a', glasses: true } },
+    farley:  { name: 'Dave Farley', cost: 70, power: 'Green light', text: 'Every stop opens and waves tickets through for 6 days.', shout: 'GREEN LIGHT!',
+      quote: 'If it hurts, do it more frequently, and bring the pain forward.', source: 'Continuous Delivery, with Jez Humble',
+      look: { hair: 'bald', col: '#9a9a9a', skin: '#f0c8a0', coat: '#25606b', beard: '#9a9a9a' } },
+    kim:     { name: 'Gene Kim', cost: 60, power: 'Clear the jam', text: 'The longest line moves on right now.', shout: 'FLOW!',
+      quote: 'Any improvements made anywhere besides the bottleneck are an illusion.', source: 'The Phoenix Project, with Kevin Behr and George Spafford',
+      look: { hair: 'short', col: '#1f1f26', skin: '#eac39a', coat: '#b5443c', glasses: true } },
+    ada:     { name: 'Ada Lovelace', cost: 60, power: 'Work it out', text: 'Every hidden bug on the floor is found and fixed.', shout: 'FOUND THEM!',
+      quote: 'The Analytical Engine has no pretensions whatever to originate any thing.', source: 'Notes on the Analytical Engine, 1843',
+      look: { hair: 'ringlets', col: '#3a2a22', skin: '#f6dcc4', coat: '#6a3f7a' } },
+    dijkstra:{ name: 'Edsger Dijkstra', cost: 55, power: 'Prove it', text: 'For 15 days, every stop catches every bug it looks at.', shout: 'PROVE IT!',
+      quote: 'Program testing can be used to show the presence of bugs, but never to show their absence!', source: 'Notes On Structured Programming, 1970',
+      look: { hair: 'bald', col: '#c9c9c9', skin: '#f0c8a0', coat: '#44505f', beard: '#c9c9c9', glasses: true } },
+    hopper:  { name: 'Grace Hopper', cost: 55, power: 'Just ship it', text: 'Review and merge lines skip the checks. Bugs and all.', shout: 'SORRY NOT SORRY!',
+      quote: "It's easier to ask forgiveness than it is to get permission.", source: 'widely quoted motto',
+      look: { hair: 'cap', col: '#e8e8e8', skin: '#f0c8a0', coat: '#1f2f5a', glasses: true } },
+    linus:   { name: 'Linus Torvalds', cost: 60, power: 'Cancel the meetings', text: 'Every stop stays open for 10 days, checks still on.', shout: 'SHOW ME THE CODE!',
+      quote: 'Talk is cheap. Show me the code.', source: 'linux-kernel mailing list, 2000',
+      look: { hair: 'short', col: '#8a7a5a', skin: '#f0c8a0', coat: '#2c6a3f', glasses: true } },
+    gates:   { name: 'Bill Gates', cost: 60, power: 'More memory', text: 'Every stop handles one extra ticket at a time for 10 days.', shout: '640K!',
+      quote: "I've said some stupid things and some wrong things, but not that.", source: 'on "640K ought to be enough", 1996 column',
+      look: { hair: 'short', col: '#a88a5a', skin: '#f3d3b3', coat: '#46536b', glasses: true } },
+  };
+
+  const has = (s, id) => !!s.owned[id];
+  const buff = (s, id) => (s.buffs[id] || 0) > 0;
+  const rnd = s => { // mulberry32
+    s.seed = (s.seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(s.seed ^ (s.seed >>> 15), 1 | s.seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const fire = (s, type, data = {}) => s.events.push({ type, ...data });
+
+  const newDev = (id, type, ramp) => ({ id, type, ramp, shipped: 0, cur: null, tray: [], help: null });
+  const DEV = {
+    junior: { speed: 0.7, bugs: 1.5, debt: 1.5 },
+    mid:    { speed: 1,   bugs: 1,   debt: 1 },
+    senior: { speed: 1.2, bugs: 0.55, debt: 0.5 },
+  };
+  function newGame(seed = 7) {
+    const s = {
+      seed, q: 0, day: 0, now: 0, phase: 'ready', coins: 15, policy: 'next', corners: 'normal', debt: 0, debtWarned: false, wip: 8, nextId: 1, carry: 0,
+      inbox: [], tickets: [], done: [], events: [], owned: {}, legends: {}, buffs: {}, starsBy: [],
+      devs: [], st: {}, waitBy: {},
+    };
+    for (let i = 0; i < 2; i++) s.devs.push(newDev(i, 'mid', 0));
+    for (const k of Object.keys(GATE)) s.st[k] = { pile: [], busy: [], chase: 0, help: 0 };
+    arrivals(s, 0);
+    return s;
+  }
+  const quarter = s => QUARTERS[s.q];
+  function gates(s) {
+    return quarter(s).gates.filter(k => !(k === 'review' && has(s, 'pair')) && !(k === 'merge' && has(s, 'trunk')) && !(k === 'release' && has(s, 'cd')));
+  }
+  function nextStage(s, stage) {
+    const active = gates(s);
+    for (let i = ORDER.indexOf(stage) + 1; i < ORDER.length; i++) {
+      if (ORDER[i] === 'prod' || active.includes(ORDER[i])) return ORDER[i];
+    }
+    return 'prod';
+  }
+  function isOpen(s, k) {
+    const g = GATE[k];
+    if (buff(s, 'express') || buff(s, 'nomeet') || s.st[k].chase > 0 || !g.cycle) return true;
+    if (k === 'test' && has(s, 'ci')) return true;
+    if (k === 'security' && has(s, 'left')) return true;
+    return s.day % g.cycle < g.open;
+  }
+  function addTicket(s) {
+    const t = { id: s.nextId++, born: s.now, state: 'inbox', stage: 'desk', worked: 0, waited: 0, rode: 0, rejects: 0, escapes: 0, defect: false, started: false, rework: false, reason: '', owner: null, left: 0, ride: null };
+    s.tickets.push(t);
+    s.inbox.push(t);
+  }
+  function arrivals(s, dt) {
+    const rate = quarter(s).rate;
+    if (has(s, 'kanban')) {
+      s.carry += rate * dt;
+      while (s.carry >= 1) { s.carry -= 1; addTicket(s); }
+    } else if (Math.floor(s.day / 10) !== Math.floor((s.day - dt) / 10) || s.day === 0) {
+      for (let i = 0; i < Math.round(rate * 10); i++) addTicket(s);
+    }
+  }
+  function send(s, t, to, back = false) {
+    const dur = back ? 1.4 : 0.7;
+    t.state = 'ride';
+    t.ride = { from: t.stage, to, left: dur, dur, back };
+  }
+  const CORNERS = { cut: { work: 0.7, debt: 2.4 }, normal: { work: 1, debt: 0.35 }, clean: { work: 1.5, debt: -2 } };
+  function newWork(s) { return 2 * (has(s, 'small') ? 0.6 : 1) * (has(s, 'tdd') ? 1.25 : 1) * CORNERS[s.corners].work; }
+  function fixWork(s) { return (has(s, 'small') ? 0.6 : 1) * (has(s, 'solid') ? 0.65 : 1); }
+  function bugChance(s, d) {
+    if (buff(s, 'nobugs')) return 0;
+    return Math.min(0.9, 0.38 * DEV[d.type].bugs * (1 + s.debt / 70) * (buff(s, 'habits') ? 0.5 : 1) * (has(s, 'tdd') ? 0.5 : 1) * (has(s, 'specs') ? 0.7 : 1) * (has(s, 'lint') ? 0.85 : 1) * (has(s, 'small') ? 0.8 : 1) * (has(s, 'pair') ? 0.6 : 1));
+  }
+  function addDebt(s, d) {
+    let gain = CORNERS[s.corners].debt;
+    if (gain > 0) {
+      if (buff(s, 'habits')) gain = 0;
+      gain *= DEV[d.type].debt * (has(s, 'tdd') ? 0.7 : 1) * (has(s, 'solid') ? 0.7 : 1);
+    }
+    s.debt = Math.max(0, Math.min(100, s.debt + gain));
+    if (s.debt >= 50 && !s.debtWarned) { s.debtWarned = true; fire(s, 'debt'); }
+  }
+  function verdict(s, k, t) {
+    if (buff(s, 'express')) return null;
+    const age = s.now - t.born, r = rnd(s);
+    if (k === 'review') {
+      if (t.defect && (r < 0.6 || buff(s, 'strict'))) return 'BUG!';
+      const picky = buff(s, 'nopicky') ? 0 : 0.16 * (has(s, 'format') ? 0.3 : 1) * (has(s, 'lint') ? 0.5 : 1) * (has(s, 'small') ? 0.6 : 1);
+      if (rnd(s) < picky) return has(s, 'format') ? 'NITPICK!' : (rnd(s) < 0.5 ? 'TABS!' : 'SPACES!');
+    }
+    if (k === 'merge' && r < Math.min(0.45, 0.04 + 0.012 * age) * (has(s, 'small') ? 0.5 : 1)) return 'CONFLICT!';
+    if (k === 'test' && t.defect && (r < (has(s, 'ci') ? 0.88 : 0.75) || buff(s, 'strict'))) return 'BUG!';
+    if (k === 'security') {
+      if (t.defect && (r < 0.3 || buff(s, 'strict'))) return 'BUG!';
+      if (rnd(s) < (has(s, 'left') ? 0.03 : 0.1)) return 'RISK!';
+    }
+    return null;
+  }
+  function pickUp(s, d, t, fresh) {
+    if (!t.started) {
+      t.started = true;
+      t.owner = d.id;
+      t.left = newWork(s);
+      t.defect = rnd(s) < bugChance(s, d);
+      t.firstPass = true;
+    } else if (fresh && t.owner !== d.id) {
+      t.left += 2; // someone new has to work out what this ticket was about
+    } else if (fresh) {
+      t.left += 1; // it has been long enough that even the author has to reload it
+    }
+    t.state = 'desk';
+    d.cur = t;
+  }
+  function finishDesk(s, d, t) {
+    d.cur = null;
+    if (t.firstPass) {
+      t.firstPass = false;
+      addDebt(s, d);
+      d.shipped++;
+      if (d.type === 'junior' && d.shipped >= 10) { d.type = 'mid'; fire(s, 'levelup', { dev: d.id }); }
+    }
+    if (t.reason === 'BUG!') t.defect = rnd(s) < 0.1;
+    t.rework = false; t.reason = '';
+    t.stage = 'desk';
+    send(s, t, nextStage(s, 'desk'));
+    fire(s, 'done', { dev: d.id });
+  }
+  function reworkLanded(s, t) {
+    t.stage = 'desk';
+    t.left = fixWork(s);
+    const d = s.devs.find(x => x.id === t.owner) || s.devs[0];
+    if (s.policy === 'back') {
+      t.state = 'inbox';
+      s.inbox.push(t);
+    } else if (s.policy === 'now' && d.cur) {
+      d.cur.state = 'tray';
+      d.cur.left += 0.8; // the dropped ticket has to be picked back up
+      d.tray.unshift(d.cur);
+      d.cur = null;
+      t.left += 0.5; // switching costs something
+      t.state = 'desk';
+      d.cur = t;
+      fire(s, 'interrupt', { dev: d.id });
+    } else if (s.policy === 'now') {
+      t.state = 'desk';
+      d.cur = t;
+    } else {
+      t.state = 'tray';
+      d.tray.push(t);
+    }
+  }
+  function land(s, t) {
+    const to = t.ride.to;
+    t.ride = null;
+    if (to === 'desk') return reworkLanded(s, t);
+    if (to === 'prod') return reachProd(s, t);
+    if (!gates(s).includes(to)) { t.stage = to; return send(s, t, nextStage(s, to)); }
+    t.stage = to;
+    t.state = 'pile';
+    s.st[to].pile.push(t);
+  }
+  function reachProd(s, t) {
+    t.stage = 'prod';
+    if (t.defect) {
+      t.defect = false;
+      t.escapes++; t.rejects++;
+      t.rework = true; t.reason = 'BUG!';
+      s.coins = Math.max(0, s.coins - 3);
+      fire(s, 'broke', { id: t.id });
+      send(s, t, 'desk', true);
+      return;
+    }
+    const age = s.now - t.born;
+    const pay = Math.max(1, Math.round(6 - age / 6));
+    s.coins += pay;
+    t.state = 'done';
+    t.age = age; t.pay = pay; t.quarter = s.q;
+    s.tickets.splice(s.tickets.indexOf(t), 1);
+    s.done.push(t);
+    fire(s, 'ship', { id: t.id, pay, age });
+  }
+  const inProgress = s => s.tickets.filter(t => t.started).length;
+  function stepDevs(s, dt) {
+    // Brooks's law: everyone slows down while new hires learn the ropes.
+    const learning = s.devs.filter(d => d.ramp > 0).length;
+    const team = (has(s, 'pair') ? 0.72 : 1) * (buff(s, 'devspeed') ? 2 : 1) / (1 + s.debt / 120) * Math.max(0.4, 1 - 0.18 * learning);
+    for (const d of s.devs) {
+      d.help = null;
+      const speed = team * DEV[d.type].speed * (d.ramp > 0 ? 0.4 : 1);
+      if (d.ramp > 0) d.ramp -= dt;
+      if (d.cur) {
+        d.cur.left -= dt * speed;
+        if (d.cur.left <= 0) finishDesk(s, d, d.cur);
+      }
+      if (d.cur) continue;
+      if (d.tray.length) { pickUp(s, d, d.tray.shift(), false); continue; }
+      const i = s.inbox.findIndex(t => t.started);
+      if (i >= 0) { pickUp(s, d, s.inbox.splice(i, 1)[0], true); continue; }
+      const limited = has(s, 'kanban') && inProgress(s) >= s.wip;
+      if (s.inbox.length && !limited) { pickUp(s, d, s.inbox.shift(), true); continue; }
+      // With a Kanban board, a robot with nothing to start helps the longest line.
+      if (!has(s, 'kanban') && !buff(s, 'swarm')) continue;
+      let best = null, size = 0;
+      for (const k of gates(s)) {
+        if (k === 'release') continue;
+        if (s.st[k].pile.length > size) { best = k; size = s.st[k].pile.length; }
+      }
+      d.help = best;
+    }
+    for (const k of Object.keys(GATE)) s.st[k].help = s.devs.filter(d => d.help === k).length;
+  }
+  function gateWork(s, k) {
+    let w = GATE[k].work;
+    if (k === 'test' && has(s, 'ci')) w = 0.25;
+    if (k === 'security' && has(s, 'left')) w = 0.3;
+    if (has(s, 'small') && k !== 'release') w *= 0.6;
+    return w;
+  }
+  function stepGates(s, dt) {
+    for (const k of Object.keys(GATE)) {
+      const st = s.st[k];
+      if (st.chase > 0) st.chase -= dt;
+      const speed = buff(s, 'gatespeed') ? 3 : 1;
+      for (const t of [...st.busy]) {
+        t.left -= dt * speed;
+        if (t.left > 0) continue;
+        st.busy.splice(st.busy.indexOf(t), 1);
+        const why = verdict(s, k, t);
+        t.stage = k;
+        if (why) {
+          t.rejects++; t.rework = true; t.reason = why;
+          fire(s, 'bounce', { gate: k, why });
+          send(s, t, 'desk', true);
+        } else {
+          send(s, t, nextStage(s, k));
+        }
+      }
+      const open = isOpen(s, k);
+      const staff = k === 'release' || buff(s, 'express') ? 99 : 1 + (k === 'review' && has(s, 'reviewer') ? 1 : 0) + (buff(s, 'extra') ? 1 : 0);
+      const cap = (open ? staff : 0) + st.help;
+      while (st.pile.length && st.busy.length < cap) {
+        const t = st.pile.shift();
+        t.state = 'gate';
+        t.left = gateWork(s, k);
+        st.busy.push(t);
+      }
+    }
+  }
+  function step(s, dt) {
+    if (s.phase !== 'run') return;
+    s.day += dt;
+    s.now += dt;
+    arrivals(s, dt);
+    for (const id of Object.keys(s.buffs)) s.buffs[id] -= dt;
+    for (const t of s.tickets) {
+      if (t.state === 'desk' || t.state === 'gate') t.worked += dt;
+      else if (t.state === 'ride') t.rode += dt;
+      else {
+        t.waited += dt;
+        const k = t.state === 'pile' ? t.stage : 'desk';
+        s.waitBy[k] = (s.waitBy[k] || 0) + dt;
+      }
+    }
+    for (const t of [...s.tickets]) {
+      if (t.state !== 'ride') continue;
+      t.ride.left -= dt;
+      if (t.ride.left <= 0) land(s, t);
+    }
+    stepDevs(s, dt);
+    stepGates(s, dt);
+    if (s.day >= LEN) endQuarter(s);
+  }
+  function summary(s, q = s.q) {
+    const list = s.done.filter(t => t.quarter === q);
+    const n = list.length || 1, sum = f => list.reduce((a, t) => a + f(t), 0);
+    return {
+      shipped: list.length,
+      days: sum(t => t.age) / n, worked: sum(t => t.worked) / n, waited: sum(t => t.waited) / n, rode: sum(t => t.rode) / n,
+      bounces: sum(t => t.rejects) / n, escapes: sum(t => t.escapes),
+      longest: list.reduce((a, t) => (a && a.age > t.age ? a : t), null),
+    };
+  }
+  function endQuarter(s) {
+    const q = quarter(s), r = summary(s);
+    let stars = 0;
+    if (r.shipped >= q.quota) stars = 1 + (r.days <= q.stars[1] ? 1 : 0) + (r.days <= q.stars[0] ? 1 : 0);
+    s.starsBy[s.q] = stars;
+    s.lastWait = Object.entries(s.waitBy).sort((a, b) => b[1] - a[1])[0] || null;
+    s.phase = s.q === QUARTERS.length - 1 ? 'over' : 'shop';
+    fire(s, 'quarter', { stars });
+  }
+  function nextQuarter(s) {
+    if (s.phase === 'shop') {
+      s.q++;
+      s.phase = 'ready';
+      s.day = 0;
+      s.waitBy = {};
+      s.buffs = {};
+      for (const k of Object.keys(s.legends)) s.legends[k] = 1;
+      arrivals(s, 0);
+    }
+  }
+  function start(s) { if (s.phase === 'ready') s.phase = 'run'; }
+  function price(s, id) {
+    const it = SHOP[id] || LEGENDS[id];
+    return it.cost + (it.step ? it.step * (s.owned[id] || 0) : 0);
+  }
+  function canBuy(s, id) {
+    const it = SHOP[id] || LEGENDS[id];
+    const have = s.owned[id] || 0;
+    const hire = id === 'junior' || id === 'senior';
+    if (hire && s.devs.length >= it.max) return false;
+    if (!hire && have >= 1) return false;
+    return s.coins >= price(s, id);
+  }
+  function buy(s, id) {
+    if (!canBuy(s, id)) return false;
+    s.coins -= price(s, id);
+    s.owned[id] = (s.owned[id] || 0) + 1;
+    if (id === 'junior' || id === 'senior') {
+      s.devs.push(newDev(s.devs.length, id, 12));
+      fire(s, 'hire');
+    }
+    if (LEGENDS[id]) { s.legends[id] = 1; fire(s, 'joined', { id }); }
+    return true;
+  }
+  function chase(s, k) {
+    if (s.phase !== 'run' || !gates(s).includes(k) || !GATE[k].chase || isOpen(s, k) || s.coins < 2) return false;
+    s.coins -= 2;
+    s.st[k].chase = 2;
+    fire(s, 'chase', { gate: k });
+    return true;
+  }
+  function usePower(s, id) {
+    if (s.phase !== 'run' || !s.legends[id]) return false;
+    s.legends[id] = 0;
+    if (id === 'bob') s.buffs.nopicky = 15;
+    if (id === 'fowler') s.buffs.devspeed = 10;
+    if (id === 'adzic') s.buffs.nobugs = 15;
+    if (id === 'north') s.buffs.gatespeed = 10;
+    if (id === 'farley') s.buffs.express = 6;
+    if (id === 'beck') s.buffs.habits = 15;
+    if (id === 'cockburn') s.buffs.swarm = 10;
+    if (id === 'dijkstra') s.buffs.strict = 15;
+    if (id === 'ward') s.debt = 0;
+    if (id === 'linus') s.buffs.nomeet = 10;
+    if (id === 'gates') s.buffs.extra = 10;
+    if (id === 'brooks') for (const d of s.devs) d.ramp = 0;
+    if (id === 'hopper') {
+      for (const k of ['review', 'merge']) {
+        for (const t of s.st[k].pile.splice(0)) { t.stage = k; send(s, t, nextStage(s, k)); }
+      }
+    }
+    if (id === 'kim') {
+      let best = null;
+      for (const k of gates(s)) if (!best || s.st[k].pile.length > s.st[best].pile.length) best = k;
+      if (best) for (const t of s.st[best].pile.splice(0)) { t.stage = best; send(s, t, nextStage(s, best)); }
+    }
+    if (id === 'ada') for (const t of s.tickets) t.defect = false;
+    if (id === 'hickey') {
+      const fix = t => { t.rework = false; t.reason = ''; t.stage = 'desk'; send(s, t, nextStage(s, 'desk')); };
+      for (const d of s.devs) {
+        for (const t of d.tray.filter(t => t.rework)) { d.tray.splice(d.tray.indexOf(t), 1); fix(t); }
+      }
+      for (const t of s.inbox.filter(t => t.rework)) { s.inbox.splice(s.inbox.indexOf(t), 1); fix(t); }
+    }
+    fire(s, 'power', { id, shout: LEGENDS[id].shout });
+    return true;
+  }
+  return { ORDER, GATE, LEN, QUARTERS, SHOP, LEGENDS, newGame, quarter, gates, isOpen, step, start, nextQuarter, summary, price, canBuy, buy, chase, usePower, has, buff };
+})();
+</script>
+
+<script id="game">
+// Drawing and input. All rules live in Sim.
+(() => {
+  const cv = document.getElementById('floor');
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const el = id => document.getElementById(id);
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const C = {
+    floor: '#27305a', floorB: '#2b3563', belt: '#49557f', beltHi: '#7584b4', back: '#6d3745', backHi: '#ff7a6b',
+    ink: '#0e1329', white: '#eef2ff', go: '#a7e05a', stop: '#ff7a6b', wait: '#ffc857', sky: '#62c6ff', dim: '#aab4dc',
+    wall: '#3a467c', wallHi: '#56649f', desk: '#b98a5a', deskLo: '#7c5a3a', band: '#161c38', worked: '#a7e05a', rode: '#62c6ff', waited: '#ffc857',
+    roof: { review: '#c78cff', merge: '#62c6ff', test: '#5fdcb4', security: '#ff9d5c', release: '#ffc857' },
+  };
+  const BOT = ['...r...', '...w...', '.wwwww.', '.wkwkw.', '.wwwww.', '..ttt..', '.ttttt.', '.t...t.'];
+  const USER = ['..hhh..', '.hsssh.', '..sss..', '...s...', '.ccccc.', 'c.ccc.c', '..ccc..', '..c.c..'];
+  const SKINS = ['#5fdcb4', '#ff9d5c', '#c78cff', '#62c6ff', '#ffc857', '#ff7a9e'];
+  const GLYPHS = {
+    A: [2,5,7,5,5], B: [6,5,6,5,6], C: [3,4,4,4,3], D: [6,5,5,5,6], E: [7,4,6,4,7], F: [7,4,6,4,4], G: [3,4,5,5,3],
+    H: [5,5,7,5,5], I: [7,2,2,2,7], J: [1,1,1,5,2], K: [5,5,6,5,5], L: [4,4,4,4,7], M: [5,7,7,5,5], N: [6,5,5,5,5],
+    O: [2,5,5,5,2], P: [6,5,6,4,4], Q: [2,5,5,6,3], R: [6,5,6,5,5], S: [3,4,2,1,6], T: [7,2,2,2,2], U: [5,5,5,5,7],
+    V: [5,5,5,5,2], W: [5,5,7,7,5], X: [5,5,2,5,5], Y: [5,5,2,2,2], Z: [7,1,2,4,7],
+    0: [7,5,5,5,7], 1: [2,6,2,2,7], 2: [6,1,2,4,7], 3: [6,1,2,1,6], 4: [5,5,7,1,1], 5: [7,4,6,1,6], 6: [3,4,7,5,7], 7: [7,1,2,2,2], 8: [7,5,7,5,7], 9: [7,5,7,1,6],
+    '!': [2,2,2,0,2], '+': [0,2,7,2,0], '-': [0,0,7,0,0], '?': [6,1,2,0,2], '/': [1,1,2,4,4], ' ': [0,0,0,0,0], '#': [5,7,5,7,5], '=': [0,7,0,7,0],
+  };
+  const rect = (c, x, y, w, h) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); };
+  function sprite(rows, pal, x, y) {
+    rows.forEach((row, j) => [...row].forEach((ch, i) => { if (pal[ch]) rect(pal[ch], x + i, y + j, 1, 1); }));
+  }
+  function text(str, x, y, colour) {
+    let cx = Math.round(x);
+    for (const ch of str) {
+      (GLYPHS[ch] || GLYPHS['?']).forEach((bits, j) => {
+        for (let b = 0; b < 3; b++) if (bits & (4 >> b)) rect(colour, cx + b, y + j, 1, 1);
+      });
+      cx += 4;
+    }
+  }
+  const tw = s => s.length * 4 - 1;
+  function label(str, cx, y, colour = C.white) {
+    const x = Math.round(Math.max(1, Math.min(319 - tw(str), cx - tw(str) / 2)));
+    rect(C.ink, x - 1, y - 1, tw(str) + 2, 7);
+    text(str, x, y, colour);
+  }
+
+  let audio = null, soundOn = true;
+  function blip(freq, ms, vol = 0.035) {
+    if (!soundOn) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), v = audio.createGain();
+      o.type = 'square'; o.frequency.value = freq;
+      v.gain.setValueAtTime(vol, audio.currentTime);
+      v.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + ms / 1000);
+      o.connect(v).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + ms / 1000);
+    } catch { soundOn = false; }
+  }
+
+  let s = Sim.newGame(Math.floor(Math.random() * 1e6));
+  let paused = false, fast = false, tick = 0, floaters = [], userMood = 0, userSay = '', lastShip = null, shownKey = '';
+  let walker = null, quoteLeft = 0;
+
+  // Draw a caricature on any 2d context at (x, y). 12 wide, 14 tall.
+  function portrait(c, x, y, look) {
+    const r = (col, a, b, w, h) => { c.fillStyle = col; c.fillRect(x + a, y + b, w, h); };
+    r(look.coat, 2, 10, 8, 4);
+    r(look.skin, 3, 2, 6, 7);
+    r(look.skin, 5, 9, 2, 1);
+    if (look.hair === 'short') { r(look.col, 3, 1, 6, 2); r(look.col, 2, 2, 1, 3); r(look.col, 9, 2, 1, 3); }
+    if (look.hair === 'bald') { r(look.col, 2, 3, 1, 3); r(look.col, 9, 3, 1, 3); }
+    if (look.hair === 'curly') { r(look.col, 2, 0, 8, 3); r(look.col, 1, 1, 2, 6); r(look.col, 9, 1, 2, 6); }
+    if (look.hair === 'ringlets') { r(look.col, 3, 1, 6, 2); r(look.col, 1, 2, 2, 9); r(look.col, 9, 2, 2, 9); }
+    if (look.hair === 'cap') { r(look.col, 2, 3, 1, 3); r(look.col, 9, 3, 1, 3); r('#1f2f5a', 2, 0, 8, 2); r('#f1f1f1', 2, 2, 8, 1); }
+    r('#0e1329', 4, 5, 1, 1);
+    r('#0e1329', 7, 5, 1, 1);
+    if (look.glasses) { r('#0e1329', 3, 4, 3, 1); r('#0e1329', 6, 4, 3, 1); r('#0e1329', 3, 6, 3, 1); r('#0e1329', 6, 6, 3, 1); }
+    if (look.beard) { r(look.beard, 3, 7, 6, 2); r(look.beard, 4, 9, 4, 1); }
+    r('#a04040', 5, 7, 2, 1);
+  }
+  function faceCanvas(look) {
+    const c = document.createElement('canvas');
+    c.width = 12; c.height = 14;
+    c.className = 'face';
+    portrait(c.getContext('2d'), 0, 0, look);
+    return c;
+  }
+  // A legend you hired walks on and says their line.
+  function cameo(id) {
+    const L = Sim.LEGENDS[id], q = el('quote');
+    q.textContent = '';
+    const body = document.createElement('div');
+    const p = document.createElement('p');
+    p.textContent = `“${L.quote}”`;
+    const src = document.createElement('small');
+    src.textContent = `${L.name}, ${L.source}`;
+    p.appendChild(src);
+    body.appendChild(p);
+    q.append(faceCanvas(L.look), body);
+    q.hidden = false;
+    quoteLeft = 420;
+    walker = { look: L.look, x: -14, life: 420 };
+  }
+
+  // ----- layout
+  const BELT = 84, BACK = 122, GATE_Y = 60;
+  const PROD_X = 296;
+  function gateX(k) {
+    const list = Sim.gates(s);
+    const i = list.indexOf(k);
+    const pad = 92, end = 272;
+    if (i < 0) return pad;
+    return list.length === 1 ? (pad + end) / 2 : pad + (end - pad) * i / (list.length - 1);
+  }
+  const deskPos = i => ({ x: 6 + (i % 3) * 24, y: 50 + Math.floor(i / 3) * 32 });
+  const stageX = k => (k === 'desk' ? 76 : k === 'prod' ? PROD_X : gateX(k));
+
+  function ticketAt(t) {
+    const r = t.ride;
+    if (!r) return null;
+    const p = 1 - Math.max(0, r.left) / r.dur;
+    const fx = stageX(r.from), tx = stageX(r.to);
+    if (!r.back) return { x: fx + (tx - fx) * p, y: BELT - 3 };
+    if (p < 0.2) return { x: fx, y: BELT - 3 + (BACK - BELT + 3) * (p / 0.2) };
+    if (p > 0.85) return { x: tx, y: BACK - (BACK - BELT + 3) * ((p - 0.85) / 0.15) };
+    return { x: fx + (tx - fx) * ((p - 0.2) / 0.65), y: BACK };
+  }
+  function drawTicket(t, x, y) {
+    const age = s.now - t.born;
+    const paper = age < 8 ? C.white : age < 16 ? '#fff0a8' : age < 30 ? C.wait : C.stop;
+    rect(C.ink, x - 3, y - 3, 7, 6);
+    rect(paper, x - 2, y - 2, 5, 4);
+    rect(C.dim, x - 1, y - 1, 3, 1);
+    if (t.rework) rect('#d8352c', x + 1, y - 2, 2, 2);
+  }
+  function pileOf(list, x, baseY, limit = 12) {
+    list.slice(0, limit).forEach((t, i) => drawTicket(t, x + (i % 2 ? 1 : -1), baseY - i * 3));
+    if (list.length > limit) label('+' + (list.length - limit), x, baseY - limit * 3 - 7, C.wait);
+  }
+
+  function draw() {
+    tick++;
+    rect(C.floor, 0, 0, 320, 180);
+    for (let y = 0; y < 132; y += 8) for (let x = (y / 8) % 2 ? 8 : 0; x < 320; x += 16) rect(C.floorB, x, y, 8, 8);
+    const t8 = calm ? 0 : Math.floor(tick / 5) % 8;
+    // Pipeline belt and return track.
+    rect(C.belt, 70, BELT, 236, 5);
+    for (let x = 70 + t8; x < 304; x += 8) rect(C.beltHi, x, BELT + 2, 3, 1);
+    rect(C.back, 72, BACK, 200, 3);
+    for (let x = 72 + (7 - t8); x < 270; x += 8) rect(C.backHi, x, BACK + 1, 2, 1);
+    rect(C.back, 72, BELT + 5, 3, BACK - BELT - 2);
+    text('BACK TO THE DESK', 74, BACK + 5, C.backHi);
+
+    // Inbox.
+    text('INBOX', 6, 4, C.dim);
+    const inbox = s.inbox;
+    inbox.slice(0, 44).forEach((t, i) => drawTicket(t, 9 + (i % 11) * 6, 15 + Math.floor(i / 11) * 7));
+    if (inbox.length > 44) label('+' + (inbox.length - 44), 62, 4, C.wait);
+    text('DESKS', 6, 42, C.dim);
+
+    // Tech debt meter.
+    const debtCol = s.debt < 25 ? C.go : s.debt < 60 ? C.wait : C.stop;
+    text('TECH DEBT', 92, 4, debtCol);
+    rect(C.ink, 130, 3, 62, 7);
+    rect(debtCol, 131, 4, Math.round(s.debt * 0.6), 5);
+
+    // Desks.
+    s.devs.forEach((d, i) => {
+      const p = deskPos(i);
+      const skin = { r: C.stop, w: '#e9edf8', k: C.ink, t: SKINS[i % SKINS.length] };
+      if (d.type === 'senior') { skin.r = C.wait; skin.w = '#c6cbdc'; }
+      if (d.type === 'junior') skin.r = C.go;
+      if (!d.help) {
+        const bob = d.cur && !calm && Math.floor(tick / 6) % 2 ? 1 : 0;
+        sprite(BOT, skin, p.x + 6, p.y + bob);
+      }
+      const tag = d.ramp > 0 ? 'NEW' : d.type === 'senior' ? 'SNR' : d.type === 'junior' ? 'JNR' : '';
+      if (tag) text(tag, p.x + 4, p.y + 21, d.ramp > 0 ? C.wait : C.dim);
+      rect(C.desk, p.x, p.y + 10, 20, 3);
+      rect(C.deskLo, p.x + 1, p.y + 13, 2, 6);
+      rect(C.deskLo, p.x + 17, p.y + 13, 2, 6);
+      if (d.cur) drawTicket(d.cur, p.x + 10, p.y + 9);
+      d.tray.slice(0, 6).forEach((t, j) => drawTicket(t, p.x + 18, p.y + 8 - j * 3));
+    });
+
+    // Stops.
+    for (const k of Sim.gates(s)) {
+      const st = s.st[k], x = gateX(k), open = Sim.isOpen(s, k);
+      const roof = C.roof[k];
+      rect(C.wall, x - 14, GATE_Y, 28, BELT - GATE_Y);
+      rect(C.wallHi, x - 14, GATE_Y, 28, 1);
+      rect(roof, x - 15, GATE_Y - 3, 30, 3);
+      rect(open ? '#1c2548' : '#12172f', x - 11, GATE_Y + 3, 22, 13);
+      if (k === 'release') {
+        // A little train.
+        const tx = open ? x - 8 + (calm ? 0 : (tick % 40) / 4) : x - 8;
+        rect(C.wait, tx, GATE_Y + 8, 12, 5);
+        rect(C.stop, tx + 8, GATE_Y + 5, 4, 3);
+        rect(C.ink, tx + 1, GATE_Y + 13, 2, 2);
+        rect(C.ink, tx + 8, GATE_Y + 13, 2, 2);
+      } else if (open) {
+        sprite(BOT, { r: roof, w: '#e9edf8', k: C.ink, t: roof }, x - 3, GATE_Y + 7);
+      } else if (!calm && Math.floor(tick / 30) % 2) {
+        rect(C.dim, x - 2, GATE_Y + 8, 4, 4);
+      }
+      if (st.help) sprite(BOT, { r: C.go, w: '#e9edf8', k: C.ink, t: SKINS[0] }, x + 5, GATE_Y + 7);
+      if (st.busy[0] && k !== 'release') drawTicket(st.busy[0], x, GATE_Y + 18);
+      pileOf(st.pile, x, GATE_Y - 7);
+      label(Sim.GATE[k].name, x, BELT + 8, open ? roof : C.dim);
+      if (!open) {
+        const word = Sim.GATE[k].closed;
+        label(word.length > 7 ? 'TRAIN' : word, x, GATE_Y + 8, C.wait);
+        if (Sim.GATE[k].chase) label('TAP', x, BELT + 15, C.wait);
+      }
+    }
+
+    // User at the end of the line.
+    const mood = userMood > 0 ? 'happy' : userMood < 0 ? 'cross' : 'idle';
+    rect(C.wall, PROD_X - 12, 60, 24, 24);
+    rect(mood === 'cross' ? '#7a2b33' : mood === 'happy' ? '#3b6b2f' : '#1c2548', PROD_X - 10, 62, 20, 13);
+    text('PROD', PROD_X - 8, 65, C.white);
+    sprite(USER, { h: '#8a5a33', s: '#f3cda1', c: mood === 'cross' ? C.stop : C.sky }, PROD_X - 3, 44 + (mood === 'happy' && !calm ? -Math.abs(Math.floor(tick / 4) % 4 - 2) : 0));
+    if (userSay) label(userSay, PROD_X - 6, 32, mood === 'cross' ? C.stop : C.go);
+
+    // Tickets riding the belt.
+    for (const t of s.tickets) {
+      if (t.state !== 'ride') continue;
+      const p = ticketAt(t);
+      if (p) drawTicket(t, p.x, p.y);
+    }
+
+    // Receipt strip.
+    rect(C.band, 0, 134, 320, 46);
+    if (lastShip) {
+      const d = lastShip;
+      text(`LAST SHIPPED #${d.id}  ${Math.round(d.age)} DAYS  ${d.rejects ? 'BOUNCED ' + d.rejects : 'NO BOUNCES'}  +${d.pay}`, 6, 138, C.white);
+      const scale = Math.min(6, 300 / Math.max(1, d.worked + d.rode + d.waited));
+      let x = 6;
+      for (const [v, c] of [[d.worked, C.worked], [d.rode, C.rode], [d.waited, C.waited]]) {
+        rect(c, x, 147, Math.max(1, Math.round(v * scale)), 9);
+        x += Math.round(v * scale);
+      }
+      text(`WORKED ${Math.round(d.worked)}`, 6, 160, C.worked);
+      text(`RODE ${Math.round(d.rode)}`, 86, 160, C.rode);
+      text(`WAITED ${Math.round(d.waited)}`, 156, 160, C.waited);
+    } else {
+      text('THE RECEIPT FOR EACH SHIPPED TICKET PRINTS HERE', 6, 138, C.dim);
+      text('TOTAL DAYS IS WHAT THE TICKET REALLY COST', 6, 148, C.dim);
+    }
+
+    // A visiting legend strolls across the floor.
+    if (walker) {
+      walker.x = Math.min(240, walker.x + (calm ? 240 : 1));
+      portrait(g, Math.round(walker.x), 20, walker.look);
+      if (--walker.life <= 0) walker = null;
+    }
+    if (quoteLeft > 0 && --quoteLeft === 0) el('quote').hidden = true;
+
+    // Floating words.
+    floaters = floaters.filter(f => f.life > 0);
+    for (const f of floaters) {
+      label(f.text, f.x, Math.round(f.y), f.colour);
+      f.y -= calm ? 0 : 0.25;
+      f.life--;
+    }
+    if (userMood > 0) userMood--;
+    if (userMood < 0) userMood++;
+    if (userMood === 0) userSay = '';
+  }
+
+  function drain() {
+    for (const e of s.events.splice(0)) {
+      if (e.type === 'ship') {
+        lastShip = s.done[s.done.length - 1];
+        userMood = 70; userSay = e.age < 10 ? 'YAY!' : e.age < 25 ? 'THANKS' : 'FINALLY!';
+        floaters.push({ text: '+' + e.pay, x: PROD_X, y: 76, colour: C.wait, life: 45 });
+        blip(780, 60); setTimeout(() => blip(1040, 80), 70);
+      } else if (e.type === 'bounce') {
+        floaters.push({ text: e.why, x: gateX(e.gate), y: 113, colour: C.stop, life: 45 });
+        blip(190, 130);
+      } else if (e.type === 'broke') {
+        userMood = -90; userSay = 'IT BROKE';
+        floaters.push({ text: '-3', x: PROD_X, y: 76, colour: C.stop, life: 50 });
+        blip(120, 240);
+      } else if (e.type === 'chase') {
+        floaters.push({ text: 'ANY UPDATE?', x: gateX(e.gate), y: 50, colour: C.wait, life: 50 });
+        blip(520, 60);
+      } else if (e.type === 'debt') {
+        floaters.push({ text: 'INTEREST!', x: 160, y: 14, colour: C.stop, life: 70 });
+      } else if (e.type === 'levelup') {
+        const p = deskPos(e.dev);
+        floaters.push({ text: 'LEVEL UP!', x: p.x + 10, y: p.y - 4, colour: C.go, life: 70 });
+        blip(880, 120);
+      } else if (e.type === 'joined') {
+        cameo(e.id);
+      } else if (e.type === 'interrupt') {
+        const p = deskPos(e.dev);
+        floaters.push({ text: 'DROP IT!', x: p.x + 10, y: p.y - 4, colour: C.stop, life: 40 });
+      } else if (e.type === 'power') {
+        floaters.push({ text: e.shout, x: 170, y: 40, colour: C.go, life: 80 });
+        cameo(e.id);
+        blip(660, 80); setTimeout(() => blip(880, 80), 80); setTimeout(() => blip(1180, 120), 160);
+      } else if (e.type === 'quarter') {
+        blip(520, 100); setTimeout(() => blip(780, 180), 110);
+      } else if (e.type === 'done') {
+        blip(440, 25, 0.015);
+      }
+    }
+  }
+
+  // ----- DOM
+  const stageName = k => (k === 'desk' ? 'the inbox and desks' : Sim.GATE[k].name.toLowerCase());
+  function button(parent, labelText, fn, cls = '', disabled = false) {
+    const b = document.createElement('button');
+    b.textContent = labelText;
+    if (cls) b.className = cls;
+    b.disabled = disabled;
+    b.addEventListener('click', fn);
+    parent.appendChild(b);
+    return b;
+  }
+  function renderHud() {
+    const r = Sim.summary(s);
+    const q = Sim.quarter(s);
+    el('coins').textContent = s.coins;
+    el('qname').textContent = `${q.name} DAY`;
+    el('clock').textContent = `${Math.min(Sim.LEN, Math.floor(s.day))}/${Sim.LEN}`;
+    el('shipped').textContent = `${r.shipped}/${q.quota}`;
+    el('avg').textContent = r.shipped ? r.days.toFixed(1) : '-';
+  }
+  function renderControls() {
+    const list = Sim.gates(s);
+    const key = [s.phase, s.q, paused, fast, soundOn, s.policy, s.corners, s.wip, s.owned.kanban, list.join(), Object.entries(s.legends).join(), s.coins < 2].join('|');
+    if (key === shownKey) {
+      el('controls').querySelectorAll('[data-chase]').forEach(b => { b.disabled = Sim.isOpen(s, b.dataset.chase) || s.coins < 2; });
+      return;
+    }
+    shownKey = key;
+    const c = el('controls'), p = el('policy'), w = el('powers');
+    c.textContent = ''; p.textContent = ''; w.textContent = '';
+    if (s.phase === 'run') {
+      button(c, paused ? 'Resume' : 'Pause', () => { paused = !paused; renderControls(); });
+      button(c, fast ? 'Speed x2' : 'Speed x1', () => { fast = !fast; renderControls(); }, fast ? 'on' : '');
+      for (const k of list) {
+        if (Sim.GATE[k].chase) {
+          const b = button(c, `Chase ${Sim.GATE[k].name.toLowerCase()} (2 coins)`, () => { Sim.chase(s, k); }, '', Sim.isOpen(s, k) || s.coins < 2);
+          b.dataset.chase = k;
+        }
+      }
+    }
+    if (s.phase === 'ready') button(c, `Start ${Sim.quarter(s).name}`, () => { Sim.start(s); paused = false; update(); }, 'go');
+    button(c, soundOn ? 'Sound on' : 'Sound off', () => { soundOn = !soundOn; renderControls(); });
+    if (s.phase === 'run' || s.phase === 'ready') {
+      const span = document.createElement('span');
+      span.textContent = 'When work bounces back:';
+      p.appendChild(span);
+      for (const [v, t] of [['now', 'Drop everything'], ['next', 'Next up'], ['back', 'Back of the line']]) {
+        button(p, t, () => { s.policy = v; renderControls(); }, s.policy === v ? 'on' : '');
+      }
+      const debtLabel = document.createElement('span');
+      debtLabel.textContent = 'How we write it:';
+      p.appendChild(debtLabel);
+      for (const [v, t] of [['cut', 'Cut corners'], ['normal', 'Normal'], ['clean', 'Clean as we go']]) {
+        button(p, t, () => { s.corners = v; renderControls(); }, s.corners === v ? 'on' : '');
+      }
+      if (Sim.has(s, 'kanban')) {
+        const lim = document.createElement('span');
+        lim.textContent = `WIP limit ${s.wip}`;
+        p.appendChild(lim);
+        button(p, 'Less', () => { s.wip = Math.max(1, s.wip - 1); renderControls(); });
+        button(p, 'More', () => { s.wip = Math.min(30, s.wip + 1); renderControls(); });
+      }
+    }
+    if (s.phase === 'run') {
+      for (const id of Object.keys(s.legends)) {
+        button(w, `${Sim.LEGENDS[id].name}: ${Sim.LEGENDS[id].power}`, () => { Sim.usePower(s, id); renderControls(); }, 'on', !s.legends[id]);
+      }
+    }
+  }
+  function renderMessage() {
+    const q = Sim.quarter(s), m = el('msg');
+    m.textContent = '';
+    const head = document.createElement('strong');
+    const para = document.createElement('div');
+    m.append(head, para);
+    if (s.phase === 'ready' || s.phase === 'run') {
+      head.textContent = `${q.name}: ${q.title}`;
+      para.textContent = q.intro + ` Ship ${q.quota} to earn your first star.`;
+    } else if (s.phase === 'shop' || s.phase === 'over') {
+      const r = Sim.summary(s);
+      head.textContent = `${q.name} done`;
+      const stars = document.createElement('div');
+      stars.className = 'stars';
+      stars.textContent = '*'.repeat(s.starsBy[s.q]) + '-'.repeat(3 - s.starsBy[s.q]);
+      const total = Math.max(0.01, r.worked + r.rode + r.waited);
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      for (const [v, c] of [[r.worked, 'var(--go)'], [r.rode, 'var(--sky)'], [r.waited, 'var(--wait)']]) {
+        const i = document.createElement('i');
+        i.style.width = (100 * v / total) + '%';
+        i.style.background = c;
+        bar.appendChild(i);
+      }
+      const key = document.createElement('div');
+      key.className = 'key';
+      for (const [t, c] of [[`Worked ${r.worked.toFixed(1)} days`, 'var(--go)'], [`Riding ${r.rode.toFixed(1)}`, 'var(--sky)'], [`Waiting ${r.waited.toFixed(1)}`, 'var(--wait)']]) {
+        const sp = document.createElement('span');
+        const dot = document.createElement('i');
+        dot.style.background = c;
+        sp.append(dot, t);
+        key.appendChild(sp);
+      }
+      const w = s.lastWait;
+      para.textContent = `Shipped ${r.shipped} of ${q.quota}, ${r.days.toFixed(1)} days each on average (three stars at ${q.stars[0]} or under). ${r.escapes} reached the user broken.` +
+        (w ? ` The most waiting happened at ${stageName(w[0])}.` : '');
+      m.append(stars, bar, key);
+      if (s.phase === 'over') {
+        const total2 = s.starsBy.reduce((a, b) => a + b, 0);
+        const end = document.createElement('p');
+        end.textContent = `Final score: ${total2} of 12 stars. Try a different mix of practices and see how far the waiting drops.`;
+        m.appendChild(end);
+      }
+    }
+  }
+  function renderShop() {
+    const area = el('shopArea');
+    area.textContent = '';
+    if (s.phase !== 'shop') {
+      if (s.phase === 'over') {
+        const row = document.createElement('div');
+        row.className = 'row';
+        button(row, 'Play again', () => { s = Sim.newGame(Math.floor(Math.random() * 1e6)); lastShip = null; update(); }, 'go');
+        area.appendChild(row);
+      }
+      return;
+    }
+    const nextName = Sim.QUARTERS[s.q + 1].name;
+    const head = document.createElement('div');
+    head.className = 'row';
+    button(head, `Go to ${nextName}`, () => { Sim.nextQuarter(s); update(); }, 'go');
+    const note = document.createElement('span');
+    note.textContent = `Spend your ${s.coins} coins before you go. Next up: ${Sim.QUARTERS[s.q + 1].title}.`;
+    head.appendChild(note);
+    area.appendChild(head);
+    const groups = {};
+    for (const [id, it] of Object.entries(Sim.SHOP)) (groups[it.group] = groups[it.group] || []).push([id, it]);
+    groups.Legends = Object.entries(Sim.LEGENDS);
+    for (const [name, items] of Object.entries(groups)) {
+      const h = document.createElement('h2');
+      h.textContent = name === 'Legends' ? 'Legends: hire one, use their power once a quarter' : name;
+      const grid = document.createElement('div');
+      grid.className = 'shop';
+      for (const [id, it] of items) {
+        const repeat = id === 'junior' || id === 'senior';
+        const have = !repeat && (s.owned[id] || 0) >= 1;
+        const b = document.createElement('button');
+        b.className = 'card' + (have ? ' have' : '');
+        const title = document.createElement('b');
+        title.textContent = it.name;
+        const cost = document.createElement('i');
+        cost.textContent = have ? 'owned' : `${Sim.price(s, id)} coins`;
+        const body = document.createElement('span');
+        body.textContent = it.text;
+        if (it.quote) {
+          b.classList.add('legend');
+          const line = document.createElement('q');
+          line.textContent = it.quote;
+          const cr = document.createElement('em');
+          cr.textContent = it.source;
+          b.append(faceCanvas(it.look), title, cost, body, line, cr);
+          cr.style.gridColumn = '1 / -1';
+        } else {
+          b.append(title, cost, body);
+        }
+        b.disabled = have || !Sim.canBuy(s, id);
+        b.addEventListener('click', () => { if (Sim.buy(s, id)) { blip(660, 70); update(); } });
+        grid.appendChild(b);
+      }
+      area.append(h, grid);
+    }
+  }
+  function update() {
+    shownKey = '';
+    renderHud(); renderControls(); renderMessage(); renderShop();
+  }
+
+  cv.addEventListener('pointerdown', e => {
+    const box = cv.getBoundingClientRect();
+    const scale = 320 / box.width;
+    const x = (e.clientX - box.left) * scale, y = (e.clientY - box.top) * scale;
+    if (y > 100) return;
+    for (const k of Sim.gates(s)) {
+      if (Math.abs(x - gateX(k)) < 18) { Sim.chase(s, k); return; }
+    }
+  });
+
+  let last = performance.now(), acc = 0, shownPhase = null;
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (s.phase === 'run' && !paused) {
+      acc += dt * (fast ? 2 : 1);
+      while (acc >= 1 / 30) { Sim.step(s, 1 / 30); acc -= 1 / 30; }
+    }
+    drain();
+    if (shownPhase !== s.phase + s.q) { shownPhase = s.phase + s.q; update(); }
+    renderHud(); renderControls();
+    draw();
+    requestAnimationFrame(frame);
+  }
+  update();
+  draw();
+  requestAnimationFrame(frame);
+  window.__ttp = { get s() { return s; } };
+})();
+</script>
