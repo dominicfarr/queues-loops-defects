@@ -1,8 +1,52 @@
 # Queues, Loops, Defects
 
-A model of what happens to each ticket as it moves through a software delivery process, and what the process's queues, loops and defects cost. Its terms come from the article [Faster and More Predictable](https://www.industriallogic.com/blog/faster-and-more-predictable/).
+An arcade game about what happens to each ticket as it moves through a software delivery process, and what the process's queues, loops and defects cost. Its delivery terms come from the article [Faster and More Predictable](https://www.industriallogic.com/blog/faster-and-more-predictable/).
 
 ## Language
+
+### Playing
+
+**Run**:
+One timed play of the game, from the first hand to the final score.
+_Avoid_: Game, session, round
+
+**Scenario**:
+The team, demand and code a run starts with.
+_Avoid_: Mess, level, variant
+
+**Pace**:
+How moves arrive during a run, such as a new hand on a timer. Scores are only compared within one pace.
+_Avoid_: Mode, difficulty
+
+**Legend**:
+A caricature of a well-known figure who arrives at random with a real quote and a power the team can save and use later. The power is the punchline.
+_Avoid_: Hero, character, hire
+
+**Move**:
+One change to how the team works, such as adopting a practice, dropping one or hiring someone. A card is only how a move is drawn.
+_Avoid_: Card, action, upgrade
+
+**Hand**:
+The moves on offer at one decision.
+_Avoid_: Shop, menu
+
+**Practice**:
+A standing way of working that takes up the team's capacity while the team keeps it.
+_Avoid_: Upgrade, process
+
+**Score**:
+What actually reached users and worked. It is the only number a run is judged by.
+_Avoid_: Points, revenue
+
+**Dials**:
+The quick overall reading of queues, loops and defects. They don't count towards the score.
+_Avoid_: Metrics, stats
+
+**Receipt**:
+The record of where the days went, showing symptoms and never causes.
+_Avoid_: Report, feedback, explanation
+
+### Delivery
 
 **Ticket**:
 One unit of work moving through the delivery process, from being handed to a developer to reaching production.
@@ -11,10 +55,6 @@ _Avoid_: Work item, change, feature
 **Simulated ticket**:
 A ticket generated from assumed process parameters, as opposed to one replayed from a real tracker's history.
 _Avoid_: Sample, synthetic data
-
-**Scenario**:
-One version of the delivery process with its own parameters, such as the current process or an improved one. A scenario carries the costs of any change it makes.
-_Avoid_: Variant, what-if
 
 ### Waiting
 
@@ -31,6 +71,10 @@ _Avoid_: Queue time
 **Defect**:
 A problem carried by a ticket. A fix can introduce a new one.
 _Avoid_: Bug, bad change
+
+**Debt**:
+The hidden state of the code that makes work slower, makes defects more likely and makes changing how the team works harder. Players only see its symptoms.
+_Avoid_: Mess, cruft
 
 **Gate**:
 A stage that may detect a defect in a ticket, and can miss it.
